@@ -1,0 +1,216 @@
+Irina Shafeeva, [05.02.2026 15:59]
+You are Claude Code. Generate a complete working Telegram bot project (Python) from this spec. Output the full repository structure with all files and code.
+
+# PROJECT: Mastermind Coach Bot (Telegram) — MVP
+Stack: Python 3.12+, aiogram 3.x, PostgreSQL, SQLAlchemy 2.x, Alembic migrations, APScheduler (asyncio-friendly), python-dotenv.
+Optional: Redis is NOT required for MVP.
+LLM: use OpenAI-compatible API for both (a) reasoning/coaching (chat completions) and (b) audio transcription (Whisper API). Implement the LLM layer behind an interface so providers can be swapped.
+
+## PRODUCT GOAL
+A Telegram bot that helps individuals manage their life goals via daily “mind dump” coaching in private chat (text or voice), and provides a lightweight social layer inside a separate team/group chat (each team is a separate Telegram chat). No voice/video calls. The bot should be an organizer of thoughts and actions.
+
+## CORE PRINCIPLES
+1) Mind dump (text/voice) is ONLY in private chat with the bot.
+2) Group chat is social layer: facts, minimal progress posts, help requests, and daily team summary + sticker.
+3) After a mind dump, the bot structures emotions and tasks, proposes 2 focus options for the day, suggests energy 1–5 (user confirms), and (optionally) offers “Go deeper” coaching only via user consent.
+4) The bot NEVER auto-posts detailed private content to group. Every group post beyond minimal facts is via a “Post Builder” where user chooses what to include and which group to post into.
+5) Group timezone and daily deadline are group-level settings, managed by “Organizers”.
+6) Gamification MVP: stickers only (private reward sticker after completing focus step and after closing the day; group sticker + short summary when all members closed the day).
+7) Members join a group via a “✅ Join” button in the group. Onboarding is in private chat.
+
+## USER EXPERIENCE SUMMARY
+### Private chat (main)
+- Daily morning ping: “Want to do a mind dump?”
+- Mind dump input: text OR voice message.
+- If voice: download file, transcribe, show transcript, confirm with buttons (✅ Correct / ✏️ Edit / 🔁 Re-record). Only after confirmation proceed.
+- Bot outputs structured response blocks A–H:
+  A) Emotion mirror (1–2 lines)
+  B) Need/meaning (1 line)
+  C) Extracted tasks (3–7 bullets)
+  D) Mapping to weekly/monthly focus
+  E) Two options for daily focus (Option A / Option B)
+  F) For each: 30–45 min step + 10 min plan B
+  G) Proposed energy 1–5 (user confirms/edits)
+  H) “Go deeper” offer if triggered (button)
+- User selects focus option A/B → daily session starts.
+- Schedule 2 mini-checkins: +3 hours and +6 hours from acceptance time.
+- Mini-checkin statuses (private): ✅ Done / 🟡 In progress / ⏳ Moved / 🆘 Need help. On any status, bot may post minimal fact to group (see below).
+- Evening report is mandatory (private): status ✅/🟡/❌ + short 3-line text (what done / what helped or blocked / first step tomorrow). If no response: 2 reminders.
+- After evening report, bot posts ONLY a fact in group: “Name closed the day ✅/🟡/❌”.
+- Post Builder: after focus creation (and optionally on help requests) bot asks what to share and which group to share to. Default minimal.
+
+### Group chat (social layer; separate chat per team)
+- Bot supports /init to initialize the team and set creator as Organizer.
+- Bot posts a message with “✅ Join” button for members to opt in.
+- Group-level settings: timezone + daily deadline time (default 00:00 in that timezone) + optional default evening reminder time. Only Organizers can change.
+- Minimal facts posted to group (enabled for MVP):
+  1) “User took daily focus ✅”
+  2) Mini-checkin status “User: ✅/🟡/⏳” (no details)
+  3) “User closed the day ✅/🟡/❌”
+  4) Help request signal 🆘 (short + reaction buttons)
+- Team completion: when ALL active members have closed the day, bot posts in group:
+  - short summary (1–2 lines: closed count, help requests count, etc.)
+  - plus a sticker
+
+Irina Shafeeva, [05.02.2026 15:59]
+Deadline: if not all closed by group deadline (default 00:00 group tz), bot posts a non-shaming summary “By deadline: closed X/Y” + (optional) no sticker unless organizer setting says otherwise. For MVP: summary without shame; sticker only for “all closed”.
+
+## HELP REQUESTS (🆘)
+In private chat, user can create a help request with type:
+1) Brainstorm
+2) 30-minute plan
+3) Outside perspective
+4) Partner for a week (MVP: post a request; matching/pair chat is optional and can be deferred)
+Flow:
+- Bot asks user to write a single concrete ask + optional deadline.
+- Then Post Builder to publish to a selected group.
+In group message include buttons for reactions:
+- brainstorm: 💡 Idea, 🔥 Best option, 🙋 I can help
+- plan 30: ✅ Check in 30m, 🙌 Support
+- perspective: ✍️ Suggest edit, ⚠️ Risk, 👍 Looks good
+- partner week: 🙋 I can, ❓ Ask, 🤝 Suggest trio
+Store reactions counts.
+
+## POST BUILDER
+After focus creation or help request:
+- Always ask which group to post into (if user is in multiple groups).
+- Show toggle choices:
+  - ✅ Focus line
+  - ✅ Step line
+  - ✅ Plan B line
+  - ✅ Energy (1–5)
+  - ✅ Ask to group (free text, optional)
+  - ✅ Only fact
+Default: Only fact + focus line.
+Publish to group as one concise message.
+
+## ORGANIZER ROLE & GROUP MEMBERSHIP
+- Organizer: can set group timezone and deadline time; can appoint other organizers.
+- Any participant can create/init a group by running /init in that chat.
+- Members join by pressing the “✅ Join” button.
+- On press: bot replies in group with “Finish onboarding in private chat” and sends a deep link to bot; in private chat onboarding begins.
+
+## ONBOARDING (PRIVATE)
+Steps:
+1) Choose 3–6 life spheres (buttons)
+2) Enter weekly focus (text)
+3) Enter monthly focus (text)
+4) Choose tone: Neutral / Soft / Strict
+5) Evening report time:
+   - default from group (if only one group), else ask user to choose preferred time; must respect group deadline time.
+Also store user timezone for personal pings (default: group tz; allow override in settings later).
+
+### User can adjust:
+- Focus week, focus month (via buttons in private chat)
+- Tone
+- Evening report time
+- Morning ping time
+- Sticker preferences (optional later)
+
+## SCHEDULING RULES
+- Morning ping daily at user’s configured time.
+- Checkins: +3h and +6h after focus acceptance.
+- Evening report at user configured time; if no response: 2 reminders (e.g., +30m and +90m) but do not cross group deadline.
+- Group deadline summary job daily at deadline time per group tz.
+- “All closed” event triggers immediately when last member closes.
+
+## DATA MODEL (Postgres)
+Use SQLAlchemy models + Alembic migrations.
+
+Tables (minimum):
+- users: id, tg_id unique, first_name, username, tone, tz_personal, morning_ping_time, evening_report_time, created_at
+- groups: id, chat_id unique, title, tz_group, deadline_time, created_by_user_id, created_at
+- memberships: id, user_id, group_id, role (member/organizer), is_active, joined_at
+- focuses: id, user_id, group_id, period ('week'|'month'), text, updated_at
+- daily_sessions: id, user_id, group_id, date_group (date in group tz), dump_text, transcript_text, energy, focus_option ('A'|'B'), focus_text, step_text, plan_b_text, accepted_at, created_at
+- checkins: id, daily_session_id, kind ('t3'|'t6'), status ('done'|'progress'|'moved'|'help'), created_at
+- evening_reports: id, daily_session_id, status ('done'|'partial'|'fail'), text, created_at
+- help_requests: id, user_id, group_id, type ('brainstorm'|'plan30'|'perspective'|'partner_week'), text, deadline_at nullable, created_at, closed_at nullable
+- help_reactions: id, help_request_id, user_id, reaction_type, created_at (prevent duplicates per user per request per reaction_type)
+- audit_posts: id, user_id, group_id, kind, message_id, payload_json, created_at
+
+## LLM / KB
+Create a knowledge/ folder with short protocol markdown files (RU):
+- grow.md
+- woop.md
+- if_then.md
+- microstep_timebox.md
+- eisenhower.md
+- impact_effort.md
+- reframe.md
+- gentle_discipline.md
+- anti_slip.md
+- help_request.md
+
+Implement CoachEngine:
+
+Irina Shafeeva, [05.02.2026 15:59]
+- analyze_mind_dump(text, weekly_focus, monthly_focus, tone) -> structured dict with A–H and two focus options.
+- Trigger “go deeper” if text indicates fear/anxiety/overwhelm; but ALWAYS require user click.
+- go_deeper_session(text, context) -> 2-3 questions + brief wrap-up.
+Keep outputs concise (max 7 bullets, short paragraphs).
+
+Transcription: Transcriber.transcribe(file_path) -> text.
+
+## TELEGRAM UX DETAILS
+### Private main menu (ReplyKeyboard or Inline menu)
+Buttons:
+- 🧠 Dump
+- 🎯 Focus Day
+- 📅 Focus Week
+- 🗓 Focus Month
+- 🆘 Help
+- ⚙️ Settings
+
+### Commands
+Private:
+- /start
+- /dump
+- /focus_day
+- /focus_week
+- /focus_month
+- /help
+- /settings
+
+Group:
+- /init
+- /group_settings
+- /organizers
+
+### Group “Join”
+In group after /init or bot added:
+- bot posts: “Join the circle” + button ✅ Join
+Callback assigns membership as member and triggers DM onboarding deep link.
+
+### In groups: no mind dump
+If user posts voice/text “dump” in group, bot should not process private content. Either ignore or reply with one-line redirect and deep link:
+“Mind dump is only in private chat. Tap to open bot.”
+
+## STICKERS
+For MVP, use fixed sticker file_id(s) configured in env:
+- STICKER_PRIVATE_STEP_DONE
+- STICKER_PRIVATE_DAY_CLOSED
+- STICKER_GROUP_ALL_CLOSED
+If not provided, fallback to emoji messages.
+
+## NON-FUNCTIONAL
+- No background promises; implement fully.
+- Handle errors gracefully.
+- Avoid spam in group: facts are one-liners.
+- Use timezone-aware datetimes (zoneinfo).
+- Ensure scheduler jobs are restored after restart: rebuild jobs from DB each startup.
+
+## DELIVERABLES
+1) Full repo with code, README setup, .env.example
+2) Docker compose for Postgres local
+3) Alembic migrations
+4) Unit-ish tests for core formatting and scheduler calculations (optional but good)
+5) Clear instructions to run locally.
+
+# IMPLEMENTATION NOTES
+- Use aiogram 3 FSM for multi-step flows (onboarding, transcription confirm, post builder, deeper session).
+- Store temporary state minimally; persist important data to DB.
+- For LLM calls, include KB snippets by selecting relevant protocol files based on detected state.
+- Rate-limit LLM per user (simple in-memory) for MVP.
+
+Now generate the repository with all necessary files and code.
