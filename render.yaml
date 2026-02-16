@@ -1,0 +1,30 @@
+databases:
+  - name: mastermind-db
+    plan: free
+    databaseName: mastermind
+    user: mastermind
+
+services:
+  - type: worker
+    name: mastermind-bot
+    runtime: docker
+    plan: starter
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: mastermind-db
+          property: connectionString
+      - key: BOT_TOKEN
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        value: https://api.openai.com/v1
+      - key: LLM_MODEL
+        value: gpt-4o-mini
+      - key: WHISPER_API_KEY
+        sync: false
+      - key: WHISPER_BASE_URL
+        value: https://api.openai.com/v1
+      - key: WHISPER_MODEL
+        value: whisper-1

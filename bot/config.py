@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import model_validator
 
 
 class Settings(BaseSettings):
@@ -11,6 +12,7 @@ class Settings(BaseSettings):
     bot_token: str
 
     # Database
+    # Render gives DATABASE_URL as postgresql://, we need postgresql+asyncpg://
     database_url: str = (
         "postgresql+asyncpg://mastermind:mastermind@localhost:5432/mastermind"
     )
@@ -32,6 +34,15 @@ class Settings(BaseSettings):
 
     # Rate limiting
     llm_requests_per_user_per_hour: int = 20
+
+    @model_validator(mode="after")
+    def fix_database_url(self):
+        """Render provides postgresql://, asyncpg needs postgresql+asyncpg://"""
+        if self.database_url.startswith("postgresql://"):
+            self.database_url = self.database_url.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            )
+        return self
 
 
 settings = Settings()
