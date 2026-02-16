@@ -157,14 +157,16 @@ async def on_text_setting(
         period = "week" if key == "weekly_focus" else "month"
         result = await db.execute(
             select(Focus).where(
-                Focus.user_id == user_db.id, Focus.period == period
+                Focus.user_id == user_db.id,
+                Focus.period == period,
+                Focus.is_active.is_(True),
             )
         )
-        focus = result.scalar_one_or_none()
+        focus = result.scalars().first()
         if focus:
             focus.text = text
         else:
-            focus = Focus(user_id=user_db.id, period=period, text=text)
+            focus = Focus(user_id=user_db.id, period=period, text=text, is_active=True)
             db.add(focus)
         await db.commit()
         label = "недели" if period == "week" else "месяца"
@@ -186,10 +188,21 @@ async def view_weekly_focus(
     message: Message, db: AsyncSession, user_db: User
 ) -> None:
     result = await db.execute(
-        select(Focus).where(Focus.user_id == user_db.id, Focus.period == "week")
+        select(Focus).where(
+            Focus.user_id == user_db.id,
+            Focus.period == "week",
+            Focus.is_active.is_(True),
+        )
     )
-    focus = result.scalar_one_or_none()
-    text = focus.text if focus else "Не задан"
+    focuses = result.scalars().all()
+    if focuses:
+        lines = []
+        for f in focuses:
+            sphere_name = f.sphere.name if f.sphere else ""
+            lines.append(f"• {sphere_name}: {f.text}" if sphere_name else f"• {f.text}")
+        text = "\n".join(lines)
+    else:
+        text = "Не задан"
     await message.answer(f"📅 *Фокус недели*:\n{text}", parse_mode="Markdown")
 
 
@@ -198,8 +211,20 @@ async def view_monthly_focus(
     message: Message, db: AsyncSession, user_db: User
 ) -> None:
     result = await db.execute(
-        select(Focus).where(Focus.user_id == user_db.id, Focus.period == "month")
+        select(Focus).where(
+            Focus.user_id == user_db.id,
+            Focus.period == "month",
+            Focus.is_active.is_(True),
+        )
     )
-    focus = result.scalar_one_or_none()
-    text = focus.text if focus else "Не задан"
+    focuses = result.scalars().all()
+    if focuses:
+        lines = []
+        for f in focuses:
+            sphere_name = f.sphere.name if f.sphere else ""
+            metric = f" ({f.metric})" if f.metric else ""
+            lines.append(f"• {sphere_name}: {f.text}{metric}" if sphere_name else f"• {f.text}{metric}")
+        text = "\n".join(lines)
+    else:
+        text = "Не задан"
     await message.answer(f"🗓 *Фокус месяца*:\n{text}", parse_mode="Markdown")

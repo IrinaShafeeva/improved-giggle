@@ -34,9 +34,13 @@ router = Router()
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 async def _get_focuses(db: AsyncSession, user_id: int) -> tuple[str, str]:
-    result = await db.execute(select(Focus).where(Focus.user_id == user_id))
-    focuses = {f.period: f.text for f in result.scalars().all()}
-    return focuses.get("week", ""), focuses.get("month", "")
+    result = await db.execute(
+        select(Focus).where(Focus.user_id == user_id, Focus.is_active.is_(True))
+    )
+    all_focuses = result.scalars().all()
+    weekly = ", ".join(f.text for f in all_focuses if f.period == "week")
+    monthly = ", ".join(f.text for f in all_focuses if f.period == "month")
+    return weekly, monthly
 
 
 def _format_analysis(a: DumpAnalysis) -> str:
@@ -284,7 +288,7 @@ async def _process_dump(
         weekly_focus=weekly_focus,
         monthly_focus=monthly_focus,
         tone=user_db.tone,
-        spheres=user_db.spheres or "",
+        spheres=", ".join(s.name for s in user_db.spheres) if user_db.spheres else "",
     )
 
     # Create daily session

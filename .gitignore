@@ -29,3 +29,8 @@ Thumbs.db
 *.ogg
 *.mp3
 tmp/
+
+# Generated assets
+fonts/
+*.pdf
+generate_kb_pdf.py

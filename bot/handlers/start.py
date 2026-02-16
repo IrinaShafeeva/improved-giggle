@@ -1,6 +1,6 @@
 """Handler for /start — entry point."""
 
-from aiogram import Router, F
+from aiogram import Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
@@ -33,13 +33,15 @@ async def cmd_start(
     await log_event(db, "start", user_id=user_db.id)
 
     await message.answer(
-        "Привет! 👋 Я — Mastermind Coach.\n\n"
+        "Привет! 👋 Я — *Mastermind Coach*.\n\n"
         "Я помогу тебе каждый день структурировать мысли, "
         "выбрать фокус и довести дело до конца.\n\n"
-        "Давай настроим бота под тебя. Начнём с выбора сфер жизни, "
-        "которые для тебя сейчас важны.\n\n"
-        "Выбери 3–6 сфер и нажми «Готово»:",
+        "Начнём с карты твоей реальности.\n"
+        "Выбери 3–6 сфер жизни, которые для тебя важны сейчас.\n"
+        "Можешь добавить свою через «➕ Своя сфера».\n\n"
+        "Нажми на сферы и потом «Готово»:",
+        parse_mode="Markdown",
         reply_markup=spheres_kb(),
     )
     await state.set_state(OnboardingStates.choosing_spheres)
-    await state.update_data(selected_spheres=set())
+    await state.update_data(selected_spheres=[])
