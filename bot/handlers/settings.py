@@ -187,6 +187,9 @@ async def on_text_setting(
 async def view_weekly_focus(
     message: Message, db: AsyncSession, user_db: User
 ) -> None:
+    if not user_db.onboarding_complete:
+        await message.answer("Сначала пройди настройку: /start")
+        return
     result = await db.execute(
         select(Focus).where(
             Focus.user_id == user_db.id,
@@ -210,6 +213,9 @@ async def view_weekly_focus(
 async def view_monthly_focus(
     message: Message, db: AsyncSession, user_db: User
 ) -> None:
+    if not user_db.onboarding_complete:
+        await message.answer("Сначала пройди настройку: /start")
+        return
     result = await db.execute(
         select(Focus).where(
             Focus.user_id == user_db.id,

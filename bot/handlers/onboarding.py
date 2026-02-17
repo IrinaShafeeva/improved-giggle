@@ -40,9 +40,25 @@ router = Router()
 
 @router.callback_query(OnboardingStates.choosing_spheres, F.data.startswith("sphere:"))
 async def on_sphere_toggle(callback: CallbackQuery, state: FSMContext) -> None:
-    sphere = callback.data.split(":", 1)[1]
+    from bot.keyboards.inline import PRESET_SPHERES
+
+    raw = callback.data.split(":", 1)[1]
     data = await state.get_data()
     selected: set = set(data.get("selected_spheres", []))
+
+    # Resolve index to sphere name
+    if raw.startswith("c"):
+        # Custom sphere — find by index among custom items
+        custom = sorted(s for s in selected if s not in PRESET_SPHERES)
+        idx = int(raw[1:])
+        sphere = custom[idx] if idx < len(custom) else None
+    else:
+        idx = int(raw)
+        sphere = PRESET_SPHERES[idx] if idx < len(PRESET_SPHERES) else None
+
+    if sphere is None:
+        await callback.answer()
+        return
 
     if sphere in selected:
         selected.discard(sphere)

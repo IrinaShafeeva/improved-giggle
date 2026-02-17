@@ -24,11 +24,10 @@ logger = logging.getLogger(__name__)
 
 async def on_startup(bot: Bot) -> None:
     """Run on bot startup."""
-    # Drop all and recreate (safe while only dev user in DB)
+    # Create tables if they don't exist (safe: won't drop existing data)
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables recreated")
+    logger.info("Database tables ensured")
 
     # Set bot reference for scheduler
     set_bot(bot)

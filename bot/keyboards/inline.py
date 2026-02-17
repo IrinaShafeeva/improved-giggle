@@ -40,11 +40,19 @@ PRESET_SPHERES = [
 def spheres_kb(selected: set[str] | None = None) -> InlineKeyboardMarkup:
     selected = selected or set()
     buttons = []
-    for s in PRESET_SPHERES:
+    # Preset spheres (use index as callback_data to stay within 64 bytes)
+    for i, s in enumerate(PRESET_SPHERES):
         check = "✅ " if s in selected else ""
         buttons.append([InlineKeyboardButton(
             text=f"{check}{s}",
-            callback_data=f"sphere:{s}",
+            callback_data=f"sphere:{i}",
+        )])
+    # Custom spheres added by user (not in presets)
+    custom = sorted(s for s in selected if s not in PRESET_SPHERES)
+    for j, s in enumerate(custom):
+        buttons.append([InlineKeyboardButton(
+            text=f"✅ {s}",
+            callback_data=f"sphere:c{j}",
         )])
     buttons.append([InlineKeyboardButton(text="➕ Своя сфера", callback_data="sphere_custom")])
     buttons.append([InlineKeyboardButton(text="Готово ➡️", callback_data="spheres_done")])
@@ -64,8 +72,8 @@ def rating_scale_kb(prefix: str) -> InlineKeyboardMarkup:
 
 def priority_confirm_kb(priorities: list[str]) -> InlineKeyboardMarkup:
     buttons = []
-    for p in priorities:
-        buttons.append([InlineKeyboardButton(text=f"✅ {p}", callback_data=f"pri_toggle:{p}")])
+    for i, p in enumerate(priorities):
+        buttons.append([InlineKeyboardButton(text=f"✅ {p}", callback_data=f"pri:{i}")])
     buttons.append([InlineKeyboardButton(text="Подтверждаю ➡️", callback_data="priorities_confirmed")])
     buttons.append([InlineKeyboardButton(text="Выбрать другие", callback_data="priorities_reselect")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
