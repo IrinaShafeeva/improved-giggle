@@ -470,6 +470,7 @@ async def on_goal_accept(
                 focus_text=mf["result"],
                 meaning=mf.get("meaning", ""),
                 metric=mf.get("metric", ""),
+                cost=mf.get("cost", ""),
             ),
         )
     except Exception as e:
@@ -498,7 +499,11 @@ async def on_goal_accept(
         wr = week_data.get("result", "")
         decomp_text += f"*Неделя {wn}:* {wr}\n"
         for step_data in week_data.get("steps", [])[:3]:
-            decomp_text += f"  • {step_data.get('step', '')}\n"
+            step = step_data.get("step", "")
+            plan_b = step_data.get("plan_b", "")
+            decomp_text += f"  • {step}\n"
+            if plan_b:
+                decomp_text += f"    _Plan B (10 мин):_ {plan_b}\n"
         decomp_text += "\n"
 
     first_steps = decomp_result.get("first_3_steps", [])
