@@ -14,6 +14,8 @@ from bot.middlewares.db import DbSessionMiddleware
 from bot.services.scheduler_service import scheduler, set_bot, rebuild_schedules
 from bot.db.session import engine
 from bot.db.base import Base
+from alembic.config import Config as AlembicConfig
+from alembic import command as alembic_command
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,10 +26,19 @@ logger = logging.getLogger(__name__)
 
 async def on_startup(bot: Bot) -> None:
     """Run on bot startup."""
-    # Create tables if they don't exist (for dev; use alembic in prod)
+    # Create tables if they don't exist
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     logger.info("Database tables ensured")
+
+    # Run Alembic migrations (safe: skips already applied)
+    try:
+        alembic_cfg = AlembicConfig("alembic.ini")
+        alembic_cfg.set_main_option("sqlalchemy.url", settings.database_url)
+        alembic_command.upgrade(alembic_cfg, "head")
+        logger.info("Alembic migrations applied")
+    except Exception as e:
+        logger.warning("Alembic migration skipped: %s", e)
 
     # Set bot reference for scheduler
     set_bot(bot)
