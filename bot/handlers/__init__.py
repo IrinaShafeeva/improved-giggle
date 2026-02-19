@@ -8,6 +8,7 @@ from bot.handlers.checkin import router as checkin_router
 from bot.handlers.evening import router as evening_router
 from bot.handlers.deeper import router as deeper_router
 from bot.handlers.settings import router as settings_router
+from bot.handlers.todos import router as todos_router
 
 
 def get_all_routers() -> list[Router]:
@@ -16,6 +17,7 @@ def get_all_routers() -> list[Router]:
         start_router,
         onboarding_router,
         focus_router,
+        todos_router,        # todo input state + item callbacks
         checkin_router,
         evening_router,
         deeper_router,

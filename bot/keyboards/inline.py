@@ -231,3 +231,34 @@ def sphere_list_kb(spheres: list[tuple[int, str]], prefix: str = "edit_sphere") 
     for sid, name in spheres:
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"{prefix}:{sid}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# ── Todo checklist ─────────────────────────────────────────────────────────────
+
+def todo_input_kb() -> InlineKeyboardMarkup:
+    """Shown when asking user to add daily todos."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Пропустить ➡️", callback_data="todo_skip")],
+    ])
+
+
+def todo_list_kb(todos: list) -> InlineKeyboardMarkup:
+    """Inline keyboard for a list of pending TodoItems."""
+    buttons = []
+    for todo in todos:
+        label = todo.text[:28] + "…" if len(todo.text) > 28 else todo.text
+        buttons.append([
+            InlineKeyboardButton(text=f"✅ {label}", callback_data=f"todo:done:{todo.id}"),
+            InlineKeyboardButton(text="➡️ Завтра", callback_data=f"todo:carry:{todo.id}"),
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+# ── Focus view with edit button ────────────────────────────────────────────────
+
+def focus_view_kb(period: str) -> InlineKeyboardMarkup:
+    """period: 'week' or 'month'"""
+    key = "weekly_focus" if period == "week" else "monthly_focus"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Изменить", callback_data=f"set:{key}")],
+    ])

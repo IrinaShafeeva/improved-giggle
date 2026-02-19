@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, Focus
-from bot.keyboards.inline import settings_kb, tone_kb, time_picker_kb, main_menu_kb
+from bot.keyboards.inline import settings_kb, tone_kb, time_picker_kb, main_menu_kb, focus_view_kb
 from bot.states.fsm import SettingsStates
 
 logger = logging.getLogger(__name__)
@@ -206,7 +206,11 @@ async def view_weekly_focus(
         text = "\n".join(lines)
     else:
         text = "Не задан"
-    await message.answer(f"📅 *Фокус недели*:\n{text}", parse_mode="Markdown")
+    await message.answer(
+        f"📅 *Фокус недели*:\n{text}",
+        parse_mode="Markdown",
+        reply_markup=focus_view_kb("week"),
+    )
 
 
 @router.message(F.text == "🗓 Фокус месяца")
@@ -228,9 +232,12 @@ async def view_monthly_focus(
         lines = []
         for f in focuses:
             sphere_name = f.sphere.name if f.sphere else ""
-            metric = f" ({f.metric})" if f.metric else ""
-            lines.append(f"• {sphere_name}: {f.text}{metric}" if sphere_name else f"• {f.text}{metric}")
+            lines.append(f"• {sphere_name}: {f.text}" if sphere_name else f"• {f.text}")
         text = "\n".join(lines)
     else:
         text = "Не задан"
-    await message.answer(f"🗓 *Фокус месяца*:\n{text}", parse_mode="Markdown")
+    await message.answer(
+        f"🗓 *Фокус месяца*:\n{text}",
+        parse_mode="Markdown",
+        reply_markup=focus_view_kb("month"),
+    )

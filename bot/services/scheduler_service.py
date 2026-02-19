@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, time as dt_time
+from datetime import date as date_type, datetime, timedelta, time as dt_time
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -212,10 +212,13 @@ async def rebuild_schedules() -> None:
 
         logger.info("Rebuilt morning pings for %d users", len(users))
 
-        # Rebuild checkins and evening reminders for today's active sessions
+        # Rebuild checkins and evening reminders for TODAY's active sessions only
+        from datetime import timezone
+        today_utc = datetime.now(timezone.utc).date()
         today_sessions = await db.execute(
             select(DailySession).where(
                 DailySession.accepted_at.isnot(None),
+                DailySession.date_local == today_utc,
             )
         )
         for session in today_sessions.scalars().all():

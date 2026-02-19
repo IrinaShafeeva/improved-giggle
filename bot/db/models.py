@@ -202,6 +202,28 @@ class EveningReport(Base):
     session: Mapped["DailySession"] = relationship(back_populates="evening_report")
 
 
+# ── Todo items (simple daily checklist) ───────────────────────────────────────
+
+class TodoItem(Base):
+    """Simple task for the day — no coaching, just checkbox tracking."""
+    __tablename__ = "todo_items"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    session_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("daily_sessions.id", ondelete="SET NULL"), nullable=True
+    )
+    date_local: Mapped[dt.date] = mapped_column(Date, index=True)
+    text: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(15), default="pending")  # pending | done | carried_over
+    carried_from_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("todo_items.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 # ── Analytics Events ───────────────────────────────────────────────────────────
 
 class Event(Base):

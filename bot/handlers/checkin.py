@@ -9,7 +9,8 @@ from aiogram.types import CallbackQuery
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import User, Checkin, DailySession
+from bot.db.models import User, Checkin, DailySession, TodoItem
+from bot.keyboards.inline import todo_list_kb
 from bot.utils.analytics import log_event
 
 logger = logging.getLogger(__name__)
@@ -96,4 +97,24 @@ async def on_checkin_status(
         response += "\n\nОк, бывает. Главное — не забросить совсем."
 
     await callback.message.edit_text(response)
+
+    # Show pending todos if any
+    todos_result = await db.execute(
+        select(TodoItem).where(
+            TodoItem.user_id == user_db.id,
+            TodoItem.session_id == session_id,
+            TodoItem.status == "pending",
+        )
+    )
+    todos = list(todos_result.scalars().all())
+    if todos:
+        lines = ["📋 *Дела на сегодня:*"]
+        for t in todos:
+            lines.append(f"• {t.text}")
+        await callback.message.answer(
+            "\n".join(lines),
+            parse_mode="Markdown",
+            reply_markup=todo_list_kb(todos),
+        )
+
     await callback.answer()

@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, DailySession
-from bot.keyboards.inline import energy_kb, go_deeper_kb, main_menu_kb
+from bot.keyboards.inline import energy_kb, go_deeper_kb, main_menu_kb, todo_input_kb
 from bot.services.scheduler_service import schedule_checkins, schedule_evening_reminders
 from bot.states.fsm import FocusStates
 from bot.utils.analytics import log_event
@@ -135,5 +135,48 @@ async def on_energy_confirmed(
     else:
         await callback.message.edit_text(response_text)
 
-    await state.clear()
+    # Ask for simple daily tasks (checklist)
+    await _ask_for_todos(callback, state, db, user_db, session_id)
     await callback.answer()
+
+
+async def _ask_for_todos(callback, state, db, user_db, session_id: int) -> None:
+    """After focus confirmed — ask if there are simple todos to track."""
+    from sqlalchemy import select
+    from datetime import date, datetime
+    from zoneinfo import ZoneInfo
+    from bot.db.models import TodoItem
+
+    # Find carried-over todos from previous days
+    tz = ZoneInfo(user_db.tz_personal or "Europe/Moscow")
+    today = datetime.now(tz).date()
+    carried = await db.execute(
+        select(TodoItem).where(
+            TodoItem.user_id == user_db.id,
+            TodoItem.date_local <= today,
+            TodoItem.status == "pending",
+            TodoItem.session_id.is_(None),  # not yet attached to a session
+        )
+    )
+    carried_items = list(carried.scalars().all())
+
+    # Attach carried-over todos to today's session
+    for item in carried_items:
+        item.session_id = session_id
+        item.date_local = today
+    if carried_items:
+        await db.commit()
+
+    carried_text = ""
+    if carried_items:
+        names = "\n".join(f"• {t.text}" for t in carried_items)
+        carried_text = f"\n\nС вчера перенесено:\n{names}"
+
+    await state.set_state(FocusStates.entering_todos)
+    await callback.message.answer(
+        f"📋 Есть ещё простые дела на сегодня?{carried_text}\n\n"
+        "Напиши или скажи голосом (например: «оплатить счёт, забрать посылку»).\n"
+        "Или пропусти — всё ок.",
+        parse_mode="Markdown",
+        reply_markup=todo_input_kb(),
+    )

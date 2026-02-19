@@ -44,6 +44,7 @@ class DumpStates(StatesGroup):
 class FocusStates(StatesGroup):
     choosing_option = State()
     confirming_energy = State()
+    entering_todos = State()   # add simple daily tasks after focus confirmed
 
 
 # ── Checkin ───────────────────────────────────────────────────────────────────
