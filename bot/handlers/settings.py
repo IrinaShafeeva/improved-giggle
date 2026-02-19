@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, Focus
-from bot.keyboards.inline import settings_kb, tone_kb, time_picker_kb, main_menu_kb, focus_view_kb
+from bot.keyboards.inline import settings_kb, tone_kb, time_picker_kb, main_menu_kb, focus_view_kb, voice_confirm_kb
 from bot.states.fsm import SettingsStates
 
 logger = logging.getLogger(__name__)
@@ -212,10 +212,33 @@ async def on_voice_setting(
         await message.answer("Не удалось распознать речь. Напиши текстом.")
         return
 
-    await message.answer(f"🎙 _{text}_", parse_mode="Markdown")
-    # Reuse text handler
-    message.text = text
-    await on_text_setting(message, state, db, user_db)
+    await state.update_data(voice_pending_settings=text)
+    await message.answer(
+        f"🎙 _{text}_\n\nВсё верно?",
+        parse_mode="Markdown",
+        reply_markup=voice_confirm_kb("settings"),
+    )
+
+
+@router.callback_query(SettingsStates.editing_value, F.data == "vc_ok:settings")
+async def confirm_voice_settings(
+    callback: CallbackQuery, state: FSMContext, db: AsyncSession, user_db: User,
+) -> None:
+    data = await state.get_data()
+    text = data.get("voice_pending_settings", "")
+    if not text:
+        await callback.answer("Текст не найден", show_alert=True)
+        return
+    await callback.message.delete()
+    callback.message.text = text
+    await on_text_setting(callback.message, state, db, user_db)
+    await callback.answer()
+
+
+@router.callback_query(SettingsStates.editing_value, F.data == "vc_edit:settings")
+async def edit_voice_settings(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("✏️ Напиши исправленный вариант:")
+    await callback.answer()
 
 
 # ── Focus view buttons from main menu ──────────────────────────────────────────

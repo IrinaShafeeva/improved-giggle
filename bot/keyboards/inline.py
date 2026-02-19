@@ -254,6 +254,18 @@ def todo_list_kb(todos: list) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+# ── Voice transcription confirmation ──────────────────────────────────────────
+
+def voice_confirm_kb(action: str) -> InlineKeyboardMarkup:
+    """Shown after transcription: let user confirm or request edit."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Верно", callback_data=f"vc_ok:{action}"),
+            InlineKeyboardButton(text="✏️ Исправить", callback_data=f"vc_edit:{action}"),
+        ],
+    ])
+
+
 # ── Focus view with edit button ────────────────────────────────────────────────
 
 def focus_view_kb(period: str) -> InlineKeyboardMarkup:

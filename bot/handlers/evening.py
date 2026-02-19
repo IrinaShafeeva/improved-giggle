@@ -11,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, DailySession, EveningReport
-from bot.keyboards.inline import main_menu_kb
+from bot.keyboards.inline import main_menu_kb, voice_confirm_kb
 from bot.states.fsm import EveningStates
 from bot.utils.analytics import log_event
 
@@ -143,6 +143,36 @@ async def on_evening_voice(
         await message.answer("Не удалось распознать речь. Напиши текстом.")
         return
 
-    # Reuse text handler logic
-    message.text = text
-    await on_evening_text(message, state, db, user_db)
+    await state.update_data(voice_pending_evening=text)
+    await message.answer(
+        f"🎙 _{text}_\n\nВсё верно?",
+        parse_mode="Markdown",
+        reply_markup=voice_confirm_kb("evening"),
+    )
+
+
+@router.callback_query(EveningStates.waiting_text, F.data == "vc_ok:evening")
+async def confirm_voice_evening(
+    callback: CallbackQuery, state: FSMContext, db: AsyncSession, user_db: User,
+) -> None:
+    data = await state.get_data()
+    text = data.get("voice_pending_evening", "")
+    if not text:
+        await callback.answer("Текст не найден", show_alert=True)
+        return
+    await callback.message.delete()
+    # Reuse text handler
+    callback.message.text = text
+    await on_evening_text(callback.message, state, db, user_db)
+    await callback.answer()
+
+
+@router.callback_query(EveningStates.waiting_text, F.data == "vc_edit:evening")
+async def edit_voice_evening(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "✏️ Напиши исправленный вариант:\n"
+        "1. Что сделал?\n"
+        "2. Что помогло или помешало?\n"
+        "3. Первый шаг завтра?"
+    )
+    await callback.answer()

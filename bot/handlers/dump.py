@@ -20,6 +20,7 @@ from bot.keyboards.inline import (
     energy_kb,
     go_deeper_kb,
     main_menu_kb,
+    voice_confirm_kb,
 )
 from bot.services.coach_engine import coach, DumpAnalysis
 from bot.services.transcriber import transcriber
@@ -159,7 +160,7 @@ async def on_voice_dump(
     db: AsyncSession,
     user_db: User,
 ) -> None:
-    await message.answer("🎙 Транскрибирую голосовое...")
+    status_msg = await message.answer("🎙 Транскрибирую голосовое...")
 
     # Download voice file
     file = await bot.get_file(message.voice.file_id)
@@ -171,16 +172,43 @@ async def on_voice_dump(
         text = await transcriber.transcribe(tmp_path)
     except Exception as e:
         logger.error("Transcription failed: %s", e)
-        await message.answer("Не удалось распознать голосовое. Попробуй ещё раз или напиши текстом.")
+        await status_msg.edit_text("Не удалось распознать голосовое. Попробуй ещё раз или напиши текстом.")
         return
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
     if not text.strip():
-        await message.answer("Не удалось распознать речь. Попробуй ещё раз.")
+        await status_msg.edit_text("Не удалось распознать речь. Попробуй ещё раз.")
         return
 
-    await _process_dump(message, state, db, user_db, text, is_voice=True)
+    await state.update_data(voice_pending_dump=text)
+    await status_msg.edit_text(
+        f"🎙 _{text}_\n\nВсё верно?",
+        parse_mode="Markdown",
+        reply_markup=voice_confirm_kb("dump"),
+    )
+
+
+@router.callback_query(DumpStates.waiting_dump, F.data == "vc_ok:dump")
+async def confirm_voice_dump(
+    callback: CallbackQuery, state: FSMContext, db: AsyncSession, user_db: User,
+) -> None:
+    data = await state.get_data()
+    text = data.get("voice_pending_dump", "")
+    if not text:
+        await callback.answer("Текст не найден", show_alert=True)
+        return
+    await callback.message.delete()
+    await _process_dump(callback.message, state, db, user_db, text, is_voice=True)
+    await callback.answer()
+
+
+@router.callback_query(DumpStates.waiting_dump, F.data == "vc_edit:dump")
+async def edit_voice_dump(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "✏️ Напиши текстом — что хочешь разобрать:"
+    )
+    await callback.answer()
 
 
 # ── Text message handler ──────────────────────────────────────────────────────

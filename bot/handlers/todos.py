@@ -15,7 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, TodoItem
-from bot.keyboards.inline import todo_input_kb, todo_list_kb, main_menu_kb
+from bot.keyboards.inline import todo_input_kb, todo_list_kb, main_menu_kb, voice_confirm_kb
 from bot.services.transcriber import transcriber
 from bot.states.fsm import FocusStates
 
@@ -158,18 +158,48 @@ async def on_todo_voice(
     if not text:
         await message.answer("Не удалось распознать. Напиши текстом или нажми «Пропустить».")
         return
-    await message.answer(f"🎙 _{text}_", parse_mode="Markdown")
+    await state.update_data(voice_pending_todos=text)
+    await message.answer(
+        f"🎙 _{text}_\n\nВсё верно?",
+        parse_mode="Markdown",
+        reply_markup=voice_confirm_kb("todos"),
+    )
+
+
+@router.callback_query(FocusStates.entering_todos, F.data == "vc_ok:todos")
+async def confirm_voice_todos(
+    callback: CallbackQuery, state: FSMContext, db: AsyncSession, user_db: User,
+) -> None:
+    data = await state.get_data()
+    text = data.get("voice_pending_todos", "")
+    if not text:
+        await callback.answer("Текст не найден", show_alert=True)
+        return
 
     items = _parse_todo_lines(text)
     if not items:
-        await message.answer("Не разобрала. Напиши или скажи список дел, или нажми «Пропустить».")
+        await callback.message.edit_text(
+            "Не разобрала. Напиши список дел или нажми «Пропустить».",
+            reply_markup=todo_input_kb(),
+        )
+        await callback.answer()
         return
 
-    data = await state.get_data()
+    await callback.message.delete()
     session_id = data.get("session_id")
     today = _user_today(user_db)
     await _save_todos(db, user_db, session_id, items, today)
-    await _finish_todos(message, state, db, user_db)
+    await _finish_todos(callback.message, state, db, user_db)
+    await callback.answer()
+
+
+@router.callback_query(FocusStates.entering_todos, F.data == "vc_edit:todos")
+async def edit_voice_todos(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "✏️ Напиши исправленный список дел:",
+        reply_markup=todo_input_kb(),
+    )
+    await callback.answer()
 
 
 @router.callback_query(FocusStates.entering_todos, F.data == "todo_skip")

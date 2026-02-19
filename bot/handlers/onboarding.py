@@ -23,6 +23,7 @@ from bot.keyboards.inline import (
     tone_kb,
     time_picker_kb,
     main_menu_kb,
+    voice_confirm_kb,
 )
 from bot.services.llm_client import llm_client
 from bot.services.transcriber import transcriber
@@ -258,8 +259,32 @@ async def on_pain_voice(
     if not text:
         await message.answer("Не удалось распознать голосовое. Напиши текстом.")
         return
-    await message.answer(f"🎙 _{text}_", parse_mode="Markdown")
-    await _handle_pain(message, state, db, user_db, text)
+    await state.update_data(voice_pending_pain=text)
+    await message.answer(
+        f"🎙 _{text}_\n\nВсё верно?",
+        parse_mode="Markdown",
+        reply_markup=voice_confirm_kb("pain"),
+    )
+
+
+@router.callback_query(OnboardingStates.entering_pain, F.data == "vc_ok:pain")
+async def confirm_voice_pain(
+    callback: CallbackQuery, state: FSMContext, db: AsyncSession, user_db: User,
+) -> None:
+    data = await state.get_data()
+    text = data.get("voice_pending_pain", "")
+    if not text:
+        await callback.answer("Текст не найден", show_alert=True)
+        return
+    await callback.message.delete()
+    await _handle_pain(callback.message, state, db, user_db, text)
+    await callback.answer()
+
+
+@router.callback_query(OnboardingStates.entering_pain, F.data == "vc_edit:pain")
+async def edit_voice_pain(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("✏️ Напиши, что сейчас болит или чего хочется:")
+    await callback.answer()
 
 
 async def _show_priorities(message: Message, state: FSMContext, assessments: dict) -> None:
@@ -407,8 +432,30 @@ async def on_month_goal_voice(message: Message, bot: Bot, state: FSMContext) -> 
     if not text:
         await message.answer("Не удалось распознать голосовое. Напиши текстом.")
         return
-    await message.answer(f"🎙 _{text}_", parse_mode="Markdown")
-    await _handle_month_goal(message, state, text)
+    await state.update_data(voice_pending_month_goal=text)
+    await message.answer(
+        f"🎙 _{text}_\n\nВсё верно?",
+        parse_mode="Markdown",
+        reply_markup=voice_confirm_kb("month_goal"),
+    )
+
+
+@router.callback_query(OnboardingStates.entering_month_result, F.data == "vc_ok:month_goal")
+async def confirm_voice_month_goal(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    text = data.get("voice_pending_month_goal", "")
+    if not text:
+        await callback.answer("Текст не найден", show_alert=True)
+        return
+    await callback.message.delete()
+    await _handle_month_goal(callback.message, state, text)
+    await callback.answer()
+
+
+@router.callback_query(OnboardingStates.entering_month_result, F.data == "vc_edit:month_goal")
+async def edit_voice_month_goal(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("✏️ Напиши исправленный вариант:")
+    await callback.answer()
 
 
 @router.callback_query(OnboardingStates.confirming_goal, F.data == "goal_accept")
@@ -514,12 +561,20 @@ async def on_goal_reframe(
     reframe = mf.get("llm_reframe", "")
 
     if reframe:
+        # Update result to the reframe so "Принять" will accept it
         mf["result"] = reframe
         mf["llm_score"] = "ok"
         await state.update_data(monthly_focuses=data["monthly_focuses"])
         await callback.message.edit_text(
-            f"✅ Принято: _{reframe}_\n\nПродолжаем!",
+            f"💡 *Переформулировка для {sphere_name}:*\n\n"
+            f"_{reframe}_\n\n"
+            "Подходит? Или хочешь написать по-другому?",
             parse_mode="Markdown",
+            reply_markup=goal_confirm_kb(),
+        )
+    else:
+        await callback.message.edit_text(
+            "Нет готовой переформулировки. Попробуй написать заново:",
             reply_markup=goal_confirm_kb(),
         )
     await callback.answer()
