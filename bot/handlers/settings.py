@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Router, F
+import tempfile
+from pathlib import Path
+
+from aiogram import Bot, Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
@@ -75,7 +78,7 @@ async def set_evening_time(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "set:weekly_focus")
 async def set_weekly_focus(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.message.edit_text("Напиши новый фокус недели:")
+    await callback.message.edit_text("Напиши или скажи голосом новый фокус недели:")
     await state.set_state(SettingsStates.editing_value)
     await state.update_data(setting_key="weekly_focus")
     await callback.answer()
@@ -83,7 +86,7 @@ async def set_weekly_focus(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "set:monthly_focus")
 async def set_monthly_focus(callback: CallbackQuery, state: FSMContext) -> None:
-    await callback.message.edit_text("Напиши новый фокус месяца:")
+    await callback.message.edit_text("Напиши или скажи голосом новый фокус месяца:")
     await state.set_state(SettingsStates.editing_value)
     await state.update_data(setting_key="monthly_focus")
     await callback.answer()
@@ -179,6 +182,40 @@ async def on_text_setting(
         return
 
     await state.clear()
+
+
+@router.message(SettingsStates.editing_value, F.voice)
+async def on_voice_setting(
+    message: Message,
+    bot: Bot,
+    state: FSMContext,
+    db: AsyncSession,
+    user_db: User,
+) -> None:
+    from bot.services.transcriber import transcriber
+
+    file = await bot.get_file(message.voice.file_id)
+    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+        tmp_path = tmp.name
+    await bot.download_file(file.file_path, tmp_path)
+
+    try:
+        text = await transcriber.transcribe(tmp_path)
+    except Exception as e:
+        logger.error("Settings voice transcription failed: %s", e)
+        await message.answer("Не удалось распознать. Напиши текстом.")
+        return
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    if not text.strip():
+        await message.answer("Не удалось распознать речь. Напиши текстом.")
+        return
+
+    await message.answer(f"🎙 _{text}_", parse_mode="Markdown")
+    # Reuse text handler
+    message.text = text
+    await on_text_setting(message, state, db, user_db)
 
 
 # ── Focus view buttons from main menu ──────────────────────────────────────────

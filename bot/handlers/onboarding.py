@@ -90,7 +90,8 @@ async def on_sphere_toggle(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(OnboardingStates.choosing_spheres, F.data == "sphere_custom")
 async def on_sphere_custom(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.edit_text(
-        "Напиши название своей сферы (например: «Путешествия», «Спорт», «Бизнес»):"
+        "✏️ Напечатай название своей сферы на клавиатуре:\n\n"
+        "(например: Путешествия, Спорт, Бизнес)"
     )
     await state.set_state(OnboardingStates.entering_custom_sphere)
     await callback.answer()

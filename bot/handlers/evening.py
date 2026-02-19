@@ -59,7 +59,7 @@ async def on_evening_status(
 
     await callback.message.edit_text(
         f"Статус дня: {status_emoji}\n\n"
-        "Напиши коротко (3 строки):\n"
+        "Напиши или скажи голосом:\n"
         "1. Что сделал?\n"
         "2. Что помогло или помешало?\n"
         "3. Первый шаг завтра?"
