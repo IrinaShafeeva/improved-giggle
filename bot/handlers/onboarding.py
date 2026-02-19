@@ -35,6 +35,11 @@ from bot.utils.analytics import log_event
 logger = logging.getLogger(__name__)
 router = Router()
 
+# Menu button texts that must NOT be treated as onboarding input
+_MENU_TEXTS = frozenset({
+    "🧠 Dump", "🎯 Фокус дня", "📅 Фокус недели", "🗓 Фокус месяца", "⚙️ Настройки"
+})
+
 
 async def _transcribe_voice(message: Message, bot: Bot) -> str | None:
     """Скачать и транскрибировать голосовое. Возвращает None при ошибке."""
@@ -100,6 +105,9 @@ async def on_sphere_custom(callback: CallbackQuery, state: FSMContext) -> None:
 
 @router.message(OnboardingStates.entering_custom_sphere, F.text)
 async def on_custom_sphere_text(message: Message, state: FSMContext) -> None:
+    if message.text.strip() in _MENU_TEXTS:
+        await message.answer("✏️ Напечатай название своей сферы:")
+        return
     custom = message.text.strip()[:50]
     data = await state.get_data()
     selected: set = set(data.get("selected_spheres", []))
@@ -248,6 +256,9 @@ async def _handle_pain(
 async def on_pain_text(
     message: Message, state: FSMContext, db: AsyncSession, user_db: User,
 ) -> None:
+    if message.text.strip() in _MENU_TEXTS:
+        await message.answer("Ты в процессе настройки. Напиши одну фразу: что сейчас болит или чего хочется в этой сфере?")
+        return
     await _handle_pain(message, state, db, user_db, message.text.strip())
 
 
@@ -423,6 +434,9 @@ async def _handle_month_goal(message: Message, state: FSMContext, raw_text: str)
 
 @router.message(OnboardingStates.entering_month_result, F.text)
 async def on_month_goal_text(message: Message, state: FSMContext) -> None:
+    if message.text.strip() in _MENU_TEXTS:
+        await message.answer("Ты в процессе настройки. Расскажи про цель на месяц — чего хочешь достичь и зачем?")
+        return
     await _handle_month_goal(message, state, message.text.strip())
 
 

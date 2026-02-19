@@ -5,10 +5,11 @@ databases:
     user: mastermind
 
 services:
-  - type: worker
+  - type: web
     name: mastermind-bot
     runtime: docker
     plan: starter
+    healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
         fromDatabase:
