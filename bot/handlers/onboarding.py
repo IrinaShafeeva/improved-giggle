@@ -596,6 +596,19 @@ async def on_goal_reframe(
     await callback.answer()
 
 
+@router.message(OnboardingStates.confirming_goal, F.text)
+async def on_goal_manual_edit(message: Message, state: FSMContext) -> None:
+    """User typed their own wording while in the confirmation stage."""
+    if message.text.strip() in _MENU_TEXTS:
+        await message.answer(
+            "Ты в процессе настройки цели. Нажми «✅ Принимаю», «📝 Написать заново» "
+            "или напечатай свою формулировку."
+        )
+        return
+    # Run validation on the manually typed text
+    await _handle_month_goal(message, state, message.text.strip())
+
+
 @router.callback_query(OnboardingStates.confirming_goal, F.data == "goal_rewrite")
 async def on_goal_rewrite(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
