@@ -160,11 +160,11 @@ async def confirm_voice_evening(
     if not text:
         await callback.answer("Текст не найден", show_alert=True)
         return
+    await callback.answer()
     await callback.message.delete()
     # Reuse text handler
     callback.message.text = text
     await on_evening_text(callback.message, state, db, user_db)
-    await callback.answer()
 
 
 @router.callback_query(EveningStates.waiting_text, F.data == "vc_edit:evening")

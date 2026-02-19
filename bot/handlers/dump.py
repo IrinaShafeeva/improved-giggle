@@ -198,9 +198,9 @@ async def confirm_voice_dump(
     if not text:
         await callback.answer("Текст не найден", show_alert=True)
         return
+    await callback.answer()  # must answer before LLM call in _process_dump
     await callback.message.delete()
     await _process_dump(callback.message, state, db, user_db, text, is_voice=True)
-    await callback.answer()
 
 
 @router.callback_query(DumpStates.waiting_dump, F.data == "vc_edit:dump")

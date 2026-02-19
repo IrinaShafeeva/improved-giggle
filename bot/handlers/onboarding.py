@@ -287,9 +287,9 @@ async def confirm_voice_pain(
     if not text:
         await callback.answer("Текст не найден", show_alert=True)
         return
+    await callback.answer()
     await callback.message.delete()
     await _handle_pain(callback.message, state, db, user_db, text)
-    await callback.answer()
 
 
 @router.callback_query(OnboardingStates.entering_pain, F.data == "vc_edit:pain")
@@ -461,9 +461,9 @@ async def confirm_voice_month_goal(callback: CallbackQuery, state: FSMContext) -
     if not text:
         await callback.answer("Текст не найден", show_alert=True)
         return
+    await callback.answer()  # must answer before LLM call in _handle_month_goal
     await callback.message.delete()
     await _handle_month_goal(callback.message, state, text)
-    await callback.answer()
 
 
 @router.callback_query(OnboardingStates.entering_month_result, F.data == "vc_edit:month_goal")
@@ -481,6 +481,9 @@ async def on_goal_accept(
     priorities = data["priority_spheres"]
     sphere_name = priorities[idx]
     mf = data["monthly_focuses"][sphere_name]
+
+    # Acknowledge callback immediately — LLM decomp takes 10-20s
+    await callback.answer()
 
     # Save focus to DB
     result = await db.execute(
@@ -561,7 +564,6 @@ async def on_goal_accept(
         reply_markup=decomposition_kb(),
     )
     await state.set_state(OnboardingStates.reviewing_decomposition)
-    await callback.answer()
 
 
 @router.callback_query(OnboardingStates.confirming_goal, F.data == "goal_reframe")

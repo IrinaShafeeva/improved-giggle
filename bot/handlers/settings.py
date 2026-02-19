@@ -229,10 +229,10 @@ async def confirm_voice_settings(
     if not text:
         await callback.answer("Текст не найден", show_alert=True)
         return
+    await callback.answer()
     await callback.message.delete()
     callback.message.text = text
     await on_text_setting(callback.message, state, db, user_db)
-    await callback.answer()
 
 
 @router.callback_query(SettingsStates.editing_value, F.data == "vc_edit:settings")

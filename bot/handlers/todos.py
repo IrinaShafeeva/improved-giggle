@@ -185,12 +185,12 @@ async def confirm_voice_todos(
         await callback.answer()
         return
 
+    await callback.answer()
     await callback.message.delete()
     session_id = data.get("session_id")
     today = _user_today(user_db)
     await _save_todos(db, user_db, session_id, items, today)
     await _finish_todos(callback.message, state, db, user_db)
-    await callback.answer()
 
 
 @router.callback_query(FocusStates.entering_todos, F.data == "vc_edit:todos")
