@@ -279,6 +279,23 @@ async def _process_dump(
     text: str,
     is_voice: bool,
 ) -> None:
+    today = _user_today(user_db)
+
+    # Dedup: если уже есть подтверждённый фокус сегодня — не создаём новую сессию
+    existing_result = await db.execute(
+        select(DailySession).where(
+            DailySession.user_id == user_db.id,
+            DailySession.date_local == today,
+            DailySession.accepted_at.isnot(None),
+        )
+    )
+    if existing_result.scalar_one_or_none():
+        await message.answer(
+            "У тебя уже есть фокус на сегодня! Нажми 🎯 Фокус дня чтобы посмотреть."
+        )
+        await state.clear()
+        return
+
     await message.answer("🤔 Анализирую...")
 
     weekly_focus, monthly_focus = await _get_focuses(db, user_db.id)
@@ -291,22 +308,36 @@ async def _process_dump(
         spheres=", ".join(s.name for s in user_db.spheres) if user_db.spheres else "",
     )
 
-    # Create daily session
-    today = _user_today(user_db)
-    session_obj = DailySession(
-        user_id=user_db.id,
-        date_local=today,
-        dump_text=text,
-        is_voice=is_voice,
-        energy=analysis.suggested_energy,
-        llm_response_json=analysis.raw,
+    # Reuse незавершённую сессию за сегодня (если была — пользователь начал dump и вышел)
+    existing2 = await db.execute(
+        select(DailySession).where(
+            DailySession.user_id == user_db.id,
+            DailySession.date_local == today,
+        )
     )
-    # Store both options temporarily
+    session_obj = existing2.scalar_one_or_none()
+
+    if session_obj:
+        session_obj.dump_text = text
+        session_obj.is_voice = is_voice
+        session_obj.energy = analysis.suggested_energy
+        session_obj.llm_response_json = analysis.raw
+    else:
+        session_obj = DailySession(
+            user_id=user_db.id,
+            date_local=today,
+            dump_text=text,
+            is_voice=is_voice,
+            energy=analysis.suggested_energy,
+            llm_response_json=analysis.raw,
+        )
+        db.add(session_obj)
+
+    # Store option_a as default (user will choose)
     if analysis.option_a:
         session_obj.focus_text = analysis.option_a.focus_text
         session_obj.step_text = analysis.option_a.step_text
         session_obj.plan_b_text = analysis.option_a.plan_b_text
-    db.add(session_obj)
     await db.commit()
     await db.refresh(session_obj)
 

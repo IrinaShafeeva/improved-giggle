@@ -17,11 +17,8 @@ class OnboardingStates(StatesGroup):
     entering_pain = State()            # free text: what hurts / what's wanted
     confirming_priorities = State()    # confirm bot-suggested priority spheres
 
-    # Step 3: Monthly focus (per priority sphere loop)
-    entering_month_result = State()    # "what result in 30 days?"
-    entering_month_meaning = State()   # "why personally?"
-    entering_month_metric = State()    # "how to measure?"
-    entering_month_cost = State()      # "what's the price?"
+    # Step 3: Monthly focus (per priority sphere loop) — один свободный вопрос
+    entering_month_result = State()    # свободное описание цели (текст или голос)
     confirming_goal = State()          # LLM validates -> user confirms or reframes
 
     # Step 4: Decomposition

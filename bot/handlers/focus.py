@@ -101,8 +101,19 @@ async def on_energy_confirmed(
     })
 
     # Schedule checkins (+3h, +6h) and evening reminders
-    await schedule_checkins(user_db, session_obj, now)
-    schedule_evening_reminders(user_db, session_obj)
+    try:
+        await schedule_checkins(user_db, session_obj, now)
+    except Exception as e:
+        logger.error("Failed to schedule checkins for user %s: %s", user_db.id, e)
+        await callback.message.answer(
+            "⚠️ Не удалось настроить напоминания о прогрессе. "
+            "Напомни мне в 3 часа и 6 часов после начала — или открой бота вручную."
+        )
+
+    try:
+        schedule_evening_reminders(user_db, session_obj)
+    except Exception as e:
+        logger.error("Failed to schedule evening reminder for user %s: %s", user_db.id, e)
 
     response_text = (
         f"🚀 Поехали! Энергия: {energy}/5\n\n"

@@ -63,16 +63,12 @@ def build_decompose_prompt(tone: str) -> str:
 def build_decompose_user_message(
     sphere: str,
     focus_text: str,
-    meaning: str,
-    metric: str,
-    cost: str = "",
+    raw_description: str = "",
 ) -> str:
     parts = [
         f"Сфера: {sphere}",
         f"Месячный фокус: {focus_text}",
-        f"Зачем: {meaning}",
-        f"Метрика: {metric}",
     ]
-    if cost:
-        parts.append(f"Бюджет времени: {cost}")
+    if raw_description:
+        parts.append(f"Контекст от пользователя: {raw_description}")
     return "\n".join(parts)

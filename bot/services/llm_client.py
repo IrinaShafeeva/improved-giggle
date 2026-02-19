@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from abc import ABC, abstractmethod
@@ -76,23 +77,34 @@ class OpenAICompatibleClient(BaseLLMClient):
         *,
         temperature: float = 0.7,
         max_tokens: int = 2000,
+        retries: int = 2,
     ) -> dict[str, Any]:
-        response = await self._client.chat.completions.create(
-            model=self._model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            response_format={"type": "json_object"},
-        )
-        raw = response.choices[0].message.content or "{}"
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            logger.error("LLM returned invalid JSON: %s", raw[:500])
-            return {"error": "invalid_json", "raw": raw[:500]}
+        for attempt in range(retries + 1):
+            response = await self._client.chat.completions.create(
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format={"type": "json_object"},
+            )
+            raw = response.choices[0].message.content or "{}"
+            try:
+                result = json.loads(raw)
+                if result.get("error") == "invalid_json":
+                    raise ValueError("LLM returned error marker")
+                return result
+            except (json.JSONDecodeError, ValueError) as exc:
+                logger.warning(
+                    "LLM returned invalid JSON (attempt %d/%d): %s | error: %s",
+                    attempt + 1, retries + 1, raw[:200], exc,
+                )
+                if attempt < retries:
+                    await asyncio.sleep(1)
+        logger.error("LLM failed to return valid JSON after %d attempts", retries + 1)
+        return {}
 
 
 # Singleton

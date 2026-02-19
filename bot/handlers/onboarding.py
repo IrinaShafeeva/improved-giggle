@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import logging
-from typing import Any
+import tempfile
+from pathlib import Path
 
-from aiogram import Router, F
+from aiogram import Bot, Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
@@ -25,6 +25,7 @@ from bot.keyboards.inline import (
     main_menu_kb,
 )
 from bot.services.llm_client import llm_client
+from bot.services.transcriber import transcriber
 from bot.prompts.validate_goal import build_validate_goal_prompt, build_validate_goal_user_message
 from bot.prompts.decompose import build_decompose_prompt, build_decompose_user_message
 from bot.states.fsm import OnboardingStates
@@ -32,6 +33,22 @@ from bot.utils.analytics import log_event
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+
+async def _transcribe_voice(message: Message, bot: Bot) -> str | None:
+    """Скачать и транскрибировать голосовое. Возвращает None при ошибке."""
+    file = await bot.get_file(message.voice.file_id)
+    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+        tmp_path = tmp.name
+    await bot.download_file(file.file_path, tmp_path)
+    try:
+        text = await transcriber.transcribe(tmp_path)
+        return text.strip() or None
+    except Exception as e:
+        logger.error("Transcription failed in onboarding: %s", e)
+        return None
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -185,11 +202,9 @@ async def on_importance(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
 
 
-@router.message(OnboardingStates.entering_pain, F.text)
-async def on_pain_text(
-    message: Message, state: FSMContext, db: AsyncSession, user_db: User,
+async def _handle_pain(
+    message: Message, state: FSMContext, db: AsyncSession, user_db: User, pain: str
 ) -> None:
-    pain = message.text.strip()
     data = await state.get_data()
     idx = data["current_sphere_idx"]
     sphere_name = data["sphere_list"][idx]
@@ -215,11 +230,8 @@ async def on_pain_text(
 
     if next_idx < len(sphere_list):
         await state.update_data(current_sphere_idx=next_idx)
+        await message.answer(f"✅ {sphere_name} — записано!\n\nДальше:")
         await message.answer(
-            f"✅ {sphere_name} — записано!\n\nДальше:",
-        )
-        # Send new message for next sphere (can't edit user's message)
-        sent = await message.answer(
             f"📊 *{sphere_list[next_idx]}*\n\n"
             "Насколько ты удовлетворён(а) этой сферой сейчас?",
             parse_mode="Markdown",
@@ -227,8 +239,26 @@ async def on_pain_text(
         )
         await state.set_state(OnboardingStates.rating_satisfaction)
     else:
-        # All spheres assessed — calculate priorities
         await _show_priorities(message, state, assessments)
+
+
+@router.message(OnboardingStates.entering_pain, F.text)
+async def on_pain_text(
+    message: Message, state: FSMContext, db: AsyncSession, user_db: User,
+) -> None:
+    await _handle_pain(message, state, db, user_db, message.text.strip())
+
+
+@router.message(OnboardingStates.entering_pain, F.voice)
+async def on_pain_voice(
+    message: Message, bot: Bot, state: FSMContext, db: AsyncSession, user_db: User,
+) -> None:
+    text = await _transcribe_voice(message, bot)
+    if not text:
+        await message.answer("Не удалось распознать голосовое. Напиши текстом.")
+        return
+    await message.answer(f"🎙 _{text}_", parse_mode="Markdown")
+    await _handle_pain(message, state, db, user_db, text)
 
 
 async def _show_priorities(message: Message, state: FSMContext, assessments: dict) -> None:
@@ -286,8 +316,8 @@ async def on_priorities_confirmed(
     sphere_name = priority_names[0]
     await callback.message.edit_text(
         f"🗓 *Месячный фокус: {sphere_name}*\n\n"
-        "Какой результат ты хочешь через 30 дней в этой сфере?\n"
-        "(конкретно, одним предложением)",
+        "Расскажи про цель на этот месяц — чего хочешь достичь и зачем?\n\n"
+        "Пиши свободно, голосом или текстом. Одного-двух предложений хватит.",
         parse_mode="Markdown",
     )
     await state.set_state(OnboardingStates.entering_month_result)
@@ -307,84 +337,22 @@ async def on_priorities_reselect(callback: CallbackQuery, state: FSMContext) -> 
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# STEP 3: MONTHLY FOCUS (loop per priority sphere)
+# STEP 3: MONTHLY FOCUS (loop per priority sphere) — один свободный вопрос
 # ═══════════════════════════════════════════════════════════════════════════════
 
-@router.message(OnboardingStates.entering_month_result, F.text)
-async def on_month_result(message: Message, state: FSMContext) -> None:
+async def _handle_month_goal(message: Message, state: FSMContext, raw_text: str) -> None:
+    """Общая логика обработки свободного описания цели (текст или голос)."""
     data = await state.get_data()
     idx = data["current_priority_idx"]
     sphere_name = data["priority_spheres"][idx]
     mf = data.get("monthly_focuses", {})
-    mf.setdefault(sphere_name, {})["result"] = message.text.strip()
+    mf.setdefault(sphere_name, {})["raw_text"] = raw_text
     await state.update_data(monthly_focuses=mf)
 
-    await message.answer(
-        f"🗓 *{sphere_name}*\n\n"
-        "Зачем тебе это лично? Что это даст именно тебе?\n"
-        "(не «надо», а «хочу потому что…»)",
-        parse_mode="Markdown",
-    )
-    await state.set_state(OnboardingStates.entering_month_meaning)
-
-
-@router.message(OnboardingStates.entering_month_meaning, F.text)
-async def on_month_meaning(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    idx = data["current_priority_idx"]
-    sphere_name = data["priority_spheres"][idx]
-    mf = data.get("monthly_focuses", {})
-    mf[sphere_name]["meaning"] = message.text.strip()
-    await state.update_data(monthly_focuses=mf)
-
-    await message.answer(
-        f"🗓 *{sphere_name}*\n\n"
-        "Как поймёшь, что получилось? Какой конкретный признак или метрика?\n"
-        "(например: «пробежал 5 км», «заработал X», «сдал экзамен»)",
-        parse_mode="Markdown",
-    )
-    await state.set_state(OnboardingStates.entering_month_metric)
-
-
-@router.message(OnboardingStates.entering_month_metric, F.text)
-async def on_month_metric(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    idx = data["current_priority_idx"]
-    sphere_name = data["priority_spheres"][idx]
-    mf = data.get("monthly_focuses", {})
-    mf[sphere_name]["metric"] = message.text.strip()
-    await state.update_data(monthly_focuses=mf)
-
-    await message.answer(
-        f"🗓 *{sphere_name}*\n\n"
-        "Какая цена? Сколько времени/усилий/дискомфорта это потребует?\n"
-        "Готов(а) ли платить эту цену?",
-        parse_mode="Markdown",
-    )
-    await state.set_state(OnboardingStates.entering_month_cost)
-
-
-@router.message(OnboardingStates.entering_month_cost, F.text)
-async def on_month_cost(message: Message, state: FSMContext) -> None:
-    data = await state.get_data()
-    idx = data["current_priority_idx"]
-    sphere_name = data["priority_spheres"][idx]
-    mf = data.get("monthly_focuses", {})
-    mf[sphere_name]["cost"] = message.text.strip()
-    await state.update_data(monthly_focuses=mf)
-
-    # LLM validation
     await message.answer("🤔 Оцениваю формулировку цели...")
 
-    goal_data = mf[sphere_name]
     sys_prompt = build_validate_goal_prompt(data.get("tone", "neutral"))
-    user_msg = build_validate_goal_user_message(
-        sphere=sphere_name,
-        result=goal_data["result"],
-        meaning=goal_data["meaning"],
-        metric=goal_data["metric"],
-        cost=goal_data["cost"],
-    )
+    user_msg = build_validate_goal_user_message(sphere=sphere_name, goal_text=raw_text)
 
     try:
         llm_result = await llm_client.chat_json(
@@ -393,12 +361,14 @@ async def on_month_cost(message: Message, state: FSMContext) -> None:
         )
     except Exception as e:
         logger.error("Goal validation LLM failed: %s", e)
-        llm_result = {"score": "ok", "analysis": "", "reframe": ""}
+        llm_result = {}
 
     score = llm_result.get("score", "ok")
+    result_text = llm_result.get("result", raw_text[:150])
     analysis = llm_result.get("analysis", "")
     reframe = llm_result.get("reframe", "")
 
+    mf[sphere_name]["result"] = result_text
     mf[sphere_name]["llm_score"] = score
     mf[sphere_name]["llm_reframe"] = reframe
     await state.update_data(monthly_focuses=mf)
@@ -406,25 +376,38 @@ async def on_month_cost(message: Message, state: FSMContext) -> None:
     score_emoji = {"ok": "✅", "vague": "🌫", "imposed": "🚩", "too_big": "📏"}.get(score, "❓")
     score_label = {
         "ok": "Отличная цель!",
-        "vague": "Расплывчато",
+        "vague": "Расплывчато — давай конкретнее",
         "imposed": "Похоже на навязанную цель",
-        "too_big": "Слишком масштабно для 30 дней",
+        "too_big": "Слишком много за 30 дней",
     }.get(score, "")
 
-    text = (
+    display = (
         f"🗓 *{sphere_name}*\n\n"
-        f"Результат: {goal_data['result']}\n"
-        f"Смысл: {goal_data['meaning']}\n"
-        f"Метрика: {goal_data['metric']}\n"
-        f"Цена: {goal_data['cost']}\n\n"
-        f"{score_emoji} *{score_label}*\n{analysis}"
+        f"Цель: _{result_text}_\n\n"
+        f"{score_emoji} *{score_label}*"
     )
-
+    if analysis:
+        display += f"\n{analysis}"
     if reframe and score != "ok":
-        text += f"\n\n💡 *Предлагаю переформулировать:*\n_{reframe}_"
+        display += f"\n\n💡 *Предлагаю:*\n_{reframe}_"
 
-    await message.answer(text, parse_mode="Markdown", reply_markup=goal_confirm_kb())
+    await message.answer(display, parse_mode="Markdown", reply_markup=goal_confirm_kb())
     await state.set_state(OnboardingStates.confirming_goal)
+
+
+@router.message(OnboardingStates.entering_month_result, F.text)
+async def on_month_goal_text(message: Message, state: FSMContext) -> None:
+    await _handle_month_goal(message, state, message.text.strip())
+
+
+@router.message(OnboardingStates.entering_month_result, F.voice)
+async def on_month_goal_voice(message: Message, bot: Bot, state: FSMContext) -> None:
+    text = await _transcribe_voice(message, bot)
+    if not text:
+        await message.answer("Не удалось распознать голосовое. Напиши текстом.")
+        return
+    await message.answer(f"🎙 _{text}_", parse_mode="Markdown")
+    await _handle_month_goal(message, state, text)
 
 
 @router.callback_query(OnboardingStates.confirming_goal, F.data == "goal_accept")
@@ -448,9 +431,7 @@ async def on_goal_accept(
         sphere_id=sphere_obj.id if sphere_obj else None,
         period="month",
         text=mf["result"],
-        meaning=mf.get("meaning"),
-        metric=mf.get("metric"),
-        cost=mf.get("cost"),
+        meaning=mf.get("raw_text"),
         llm_score=mf.get("llm_score"),
         llm_reframe=mf.get("llm_reframe"),
         is_active=True,
@@ -468,9 +449,7 @@ async def on_goal_accept(
             user_message=build_decompose_user_message(
                 sphere=sphere_name,
                 focus_text=mf["result"],
-                meaning=mf.get("meaning", ""),
-                metric=mf.get("metric", ""),
-                cost=mf.get("cost", ""),
+                raw_description=mf.get("raw_text", ""),
             ),
         )
     except Exception as e:
@@ -553,7 +532,8 @@ async def on_goal_rewrite(callback: CallbackQuery, state: FSMContext) -> None:
 
     await callback.message.edit_text(
         f"🗓 *{sphere_name}*\n\n"
-        "Напиши результат заново — какой результат через 30 дней?",
+        "Расскажи заново — чего хочешь достичь и зачем?\n"
+        "Голосом или текстом, свободно.",
         parse_mode="Markdown",
     )
     await state.set_state(OnboardingStates.entering_month_result)
@@ -579,8 +559,8 @@ async def on_decomp_accept(
         sphere_name = priorities[next_idx]
         await callback.message.edit_text(
             f"🗓 *Месячный фокус: {sphere_name}*\n\n"
-            "Какой результат ты хочешь через 30 дней в этой сфере?\n"
-            "(конкретно, одним предложением)",
+            "Расскажи про цель на этот месяц — чего хочешь достичь и зачем?\n\n"
+            "Пиши свободно, голосом или текстом.",
             parse_mode="Markdown",
         )
         await state.set_state(OnboardingStates.entering_month_result)
