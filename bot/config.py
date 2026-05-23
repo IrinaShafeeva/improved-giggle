@@ -10,6 +10,7 @@ class Settings(BaseSettings):
 
     # Telegram
     bot_token: str
+    admin_tg_ids: str = ""
 
     # Database
     # Render gives DATABASE_URL as postgresql://, we need postgresql+asyncpg://

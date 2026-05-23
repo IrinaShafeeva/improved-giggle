@@ -73,6 +73,13 @@ class SettingsStates(StatesGroup):
     editing_value = State()
 
 
+# ── Context ───────────────────────────────────────────────────────────────────
+
+class ContextStates(StatesGroup):
+    choosing_period = State()
+    editing_context = State()
+
+
 # ── Focus editing ─────────────────────────────────────────────────────────────
 
 class FocusEditStates(StatesGroup):

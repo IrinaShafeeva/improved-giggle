@@ -1,4 +1,4 @@
-"""Mind dump handler — voice or text input -> LLM analysis -> focus selection."""
+"""Mind dump handler — voice or text input -> mirror, structure and tasks."""
 
 from __future__ import annotations
 
@@ -14,17 +14,15 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import User, Focus, DailySession
+from bot.db.models import User, Focus, DailySession, UserContext
 from bot.keyboards.inline import (
-    focus_options_kb,
-    energy_kb,
-    go_deeper_kb,
     main_menu_kb,
+    tasks_review_kb,
     voice_confirm_kb,
 )
 from bot.services.coach_engine import coach, DumpAnalysis
 from bot.services.transcriber import transcriber
-from bot.states.fsm import DumpStates, FocusStates
+from bot.states.fsm import DumpStates
 from bot.utils.analytics import log_event
 
 logger = logging.getLogger(__name__)
@@ -44,32 +42,33 @@ async def _get_focuses(db: AsyncSession, user_id: int) -> tuple[str, str]:
     return weekly, monthly
 
 
+async def _get_contexts(db: AsyncSession, user_id: int) -> tuple[str, str]:
+    result = await db.execute(
+        select(UserContext).where(UserContext.user_id == user_id)
+    )
+    contexts = result.scalars().all()
+    weekly = next((c.text for c in contexts if c.period == "week"), "")
+    monthly = next((c.text for c in contexts if c.period == "month"), "")
+    return weekly, monthly
+
+
 def _format_analysis(a: DumpAnalysis) -> str:
     lines = []
     if a.emotion_mirror:
-        lines.append(f"🪞 *Зеркало эмоций*\n{a.emotion_mirror}")
-    if a.need_meaning:
-        lines.append(f"💡 *Потребность*\n{a.need_meaning}")
+        lines.append(f"🪞 *Что я слышу*\n{a.emotion_mirror}")
+    if a.structure:
+        structure_text = "\n".join(f"  • {item}" for item in a.structure)
+        lines.append(f"🧩 *Структура*\n{structure_text}")
     if a.tasks:
         tasks_text = "\n".join(f"  • {t}" for t in a.tasks)
         lines.append(f"📋 *Задачи*\n{tasks_text}")
-    if a.focus_mapping:
-        lines.append(f"🎯 *Связь с фокусом*\n{a.focus_mapping}")
-
-    if a.option_a:
-        lines.append(
-            f"🅰️ *Вариант A: {a.option_a.focus_text}*\n"
-            f"  Шаг (30-45 мин): {a.option_a.step_text}\n"
-            f"  План Б (10 мин): {a.option_a.plan_b_text}"
-        )
-    if a.option_b:
-        lines.append(
-            f"🅱️ *Вариант B: {a.option_b.focus_text}*\n"
-            f"  Шаг (30-45 мин): {a.option_b.step_text}\n"
-            f"  План Б (10 мин): {a.option_b.plan_b_text}"
-        )
-
-    lines.append(f"⚡ *Энергия*: {a.suggested_energy}/5")
+    if a.blind_spots:
+        blind_spots_text = "\n".join(f"  • {item}" for item in a.blind_spots)
+        lines.append(f"🔎 *Мысли, которые могут влиять сильнее, чем кажется*\n{blind_spots_text}")
+    if a.context_links:
+        lines.append(f"📌 *Связь с контекстом*\n{a.context_links}")
+    if a.day_summary:
+        lines.append(f"🎯 *Главное на сегодня*\n{a.day_summary}")
 
     return "\n\n".join(lines)
 
@@ -81,14 +80,14 @@ def _user_today(user: User) -> date:
 
 # ── Entry points (button or command or direct message) ─────────────────────────
 
-@router.message(F.text == "🧠 Dump")
+@router.message(F.text.in_({"🧠 Выгрузка", "🧠 Dump"}))
 async def dump_button(message: Message, state: FSMContext, user_db: User) -> None:
     if not user_db.onboarding_complete:
         await message.answer("Сначала пройди настройку: /start")
         return
     await message.answer(
-        "Отправь голосовое сообщение или напиши текст — "
-        "выгрузи всё, что в голове прямо сейчас. 🧠"
+        "Отправь голосовое или текст — выгрузи всё, что в голове прямо сейчас. "
+        "Я отражу чувства, структуру, незаметные мысли и задачи."
     )
     await state.set_state(DumpStates.waiting_dump)
 
@@ -252,7 +251,7 @@ async def on_voice_direct(
         )
     )
     if result.scalar_one_or_none():
-        await message.answer("У тебя уже есть фокус на сегодня! Используй 🎯 Фокус дня чтобы посмотреть.")
+        await message.answer("У тебя уже есть выгрузка на сегодня. Задачи можно посмотреть через 📋 Задачи.")
         return
 
     await state.set_state(DumpStates.waiting_dump)
@@ -269,7 +268,10 @@ async def on_text_direct(
     user_db: User,
 ) -> None:
     # Skip menu button texts
-    menu_texts = {"🧠 Dump", "🎯 Фокус дня", "📅 Фокус недели", "🗓 Фокус месяца", "⚙️ Настройки"}
+    menu_texts = {
+        "🧠 Выгрузка", "📌 Контекст", "📋 Задачи", "⚙️ Настройки",
+        "🧠 Dump", "🎯 Фокус дня", "📅 Фокус недели", "🗓 Фокус месяца",
+    }
     if message.text.strip() in menu_texts:
         return  # handled by other routers
 
@@ -319,7 +321,7 @@ async def _process_dump(
     )
     if existing_result.scalar_one_or_none():
         await message.answer(
-            "У тебя уже есть фокус на сегодня! Нажми 🎯 Фокус дня чтобы посмотреть."
+            "У тебя уже есть выгрузка на сегодня. Задачи можно посмотреть через 📋 Задачи."
         )
         await state.clear()
         return
@@ -327,6 +329,7 @@ async def _process_dump(
     await message.answer("🤔 Анализирую...")
 
     weekly_focus, monthly_focus = await _get_focuses(db, user_db.id)
+    weekly_context, monthly_context = await _get_contexts(db, user_db.id)
 
     analysis = await coach.analyze_mind_dump(
         text=text,
@@ -334,6 +337,8 @@ async def _process_dump(
         monthly_focus=monthly_focus,
         tone=user_db.tone,
         spheres=", ".join(s.name for s in user_db.spheres) if user_db.spheres else "",
+        weekly_context=weekly_context,
+        monthly_context=monthly_context,
     )
 
     # Reuse незавершённую сессию за сегодня (если была — пользователь начал dump и вышел)
@@ -349,7 +354,9 @@ async def _process_dump(
         session_obj.dump_text = text
         session_obj.is_voice = is_voice
         session_obj.energy = analysis.suggested_energy
+        session_obj.household_tasks = {"tasks": analysis.tasks}
         session_obj.llm_response_json = analysis.raw
+        session_obj.accepted_at = datetime.now(ZoneInfo(user_db.tz_personal or "Europe/Moscow"))
     else:
         session_obj = DailySession(
             user_id=user_db.id,
@@ -357,15 +364,12 @@ async def _process_dump(
             dump_text=text,
             is_voice=is_voice,
             energy=analysis.suggested_energy,
+            household_tasks={"tasks": analysis.tasks},
             llm_response_json=analysis.raw,
+            accepted_at=datetime.now(ZoneInfo(user_db.tz_personal or "Europe/Moscow")),
         )
         db.add(session_obj)
 
-    # Store option_a as default (user will choose)
-    if analysis.option_a:
-        session_obj.focus_text = analysis.option_a.focus_text
-        session_obj.step_text = analysis.option_a.step_text
-        session_obj.plan_b_text = analysis.option_a.plan_b_text
     await db.commit()
     await db.refresh(session_obj)
 
@@ -373,33 +377,18 @@ async def _process_dump(
         "is_voice": is_voice, "session_id": session_obj.id
     })
 
-    # Send analysis
     formatted = _format_analysis(analysis)
-    await message.answer(formatted, parse_mode="Markdown")
+    await message.answer(formatted or "Я записала выгрузку.", parse_mode="Markdown")
 
-    # Focus choice
-    await message.answer(
-        "Какой вариант выбираешь?",
-        reply_markup=focus_options_kb(),
-    )
-
-    # Store analysis in FSM for focus selection
-    await state.update_data(
-        session_id=session_obj.id,
-        analysis_raw=analysis.raw,
-        option_a={
-            "focus": analysis.option_a.focus_text if analysis.option_a else "",
-            "step": analysis.option_a.step_text if analysis.option_a else "",
-            "plan_b": analysis.option_a.plan_b_text if analysis.option_a else "",
-        },
-        option_b={
-            "focus": analysis.option_b.focus_text if analysis.option_b else "",
-            "step": analysis.option_b.step_text if analysis.option_b else "",
-            "plan_b": analysis.option_b.plan_b_text if analysis.option_b else "",
-        },
-        suggested_energy=analysis.suggested_energy,
-        go_deeper_triggered=analysis.go_deeper_triggered,
-        dump_text=text,
-        emotion_mirror=analysis.emotion_mirror,
-    )
-    await state.set_state(FocusStates.choosing_option)
+    task_count = len(analysis.tasks)
+    if task_count:
+        await message.answer(
+            f"Нашла задач: {task_count}. Добавить их в список на сегодня?",
+            reply_markup=tasks_review_kb(session_obj.id, has_tasks=True),
+        )
+    else:
+        await message.answer(
+            "Я не увидела явных задач. Можно добавить вручную, если что-то появилось.",
+            reply_markup=tasks_review_kb(session_obj.id, has_tasks=False),
+        )
+    await state.clear()

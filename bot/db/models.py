@@ -29,7 +29,7 @@ class User(Base):
     tg_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
     first_name: Mapped[str] = mapped_column(String(255), default="")
     username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    tone: Mapped[str] = mapped_column(String(20), default="neutral")
+    tone: Mapped[str] = mapped_column(String(20), default="no_therapy")
     tz_personal: Mapped[str] = mapped_column(String(50), default="Europe/Moscow")
     morning_ping_time: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
     evening_report_time: Mapped[Optional[str]] = mapped_column(String(5), nullable=True)
@@ -48,6 +48,29 @@ class User(Base):
     daily_sessions: Mapped[list["DailySession"]] = relationship(
         back_populates="user", lazy="selectin"
     )
+    contexts: Mapped[list["UserContext"]] = relationship(
+        back_populates="user", lazy="selectin", cascade="all, delete-orphan"
+    )
+
+
+# ── User contexts ─────────────────────────────────────────────────────────────
+
+class UserContext(Base):
+    """User-provided life context for the current week or month."""
+    __tablename__ = "user_contexts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "period", name="uq_user_context_period"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    period: Mapped[str] = mapped_column(String(10))  # "week" | "month"
+    text: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[dt.datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    user: Mapped["User"] = relationship(back_populates="contexts")
 
 
 # ── Spheres ────────────────────────────────────────────────────────────────────

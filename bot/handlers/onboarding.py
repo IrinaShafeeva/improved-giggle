@@ -37,7 +37,8 @@ router = Router()
 
 # Menu button texts that must NOT be treated as onboarding input
 _MENU_TEXTS = frozenset({
-    "🧠 Dump", "🎯 Фокус дня", "📅 Фокус недели", "🗓 Фокус месяца", "⚙️ Настройки"
+    "🧠 Выгрузка", "📌 Контекст", "📋 Задачи", "⚙️ Настройки",
+    "🧠 Dump", "🎯 Фокус дня", "📅 Фокус недели", "🗓 Фокус месяца",
 })
 
 

@@ -1,4 +1,4 @@
-"""Scheduler service — APScheduler jobs for pings, checkins, evening reminders."""
+"""Scheduler service — APScheduler jobs for pings, context updates, checkins, evening reminders."""
 
 from __future__ import annotations
 
@@ -40,12 +40,36 @@ async def send_morning_ping(user_tg_id: int) -> None:
     try:
         await _bot.send_message(
             chat_id=user_tg_id,
-            text="☀️ Доброе утро!\n\nХочешь сделать mind dump? "
+            text="☀️ Доброе утро!\n\nСделаем «Мой день»? "
                  "Отправь голосовое или текст — выгрузи всё, что в голове.",
             reply_markup=morning_ping_kb(),
         )
     except Exception as e:
         logger.error("Failed to send morning ping to %s: %s", user_tg_id, e)
+
+
+# ── Context update reminders ─────────────────────────────────────────────────
+
+async def send_context_reminder(user_tg_id: int, period: str) -> None:
+    """Ask user to refresh weekly or monthly context."""
+    if _bot is None:
+        logger.error("Bot not set in scheduler")
+        return
+
+    from bot.keyboards.inline import context_period_kb
+
+    label = "недели" if period == "week" else "месяца"
+    try:
+        await _bot.send_message(
+            chat_id=user_tg_id,
+            text=(
+                f"📌 Новый контекст {label}.\n\n"
+                "Обновишь, что сейчас происходит и что мне учитывать в утренних выгрузках?"
+            ),
+            reply_markup=context_period_kb(),
+        )
+    except Exception as e:
+        logger.error("Failed to send context reminder to %s: %s", user_tg_id, e)
 
 
 # ── Checkin notifications ──────────────────────────────────────────────────────
@@ -198,7 +222,7 @@ async def rebuild_schedules() -> None:
         users = result.scalars().all()
 
         for user in users:
-            h, m = map(int, user.morning_ping_time.split(":"))
+            h, m = map(int, (user.morning_ping_time or "09:00").split(":"))
             tz = ZoneInfo(user.tz_personal or "Europe/Moscow")
 
             job_id = f"morning_ping_{user.id}"
@@ -207,6 +231,21 @@ async def rebuild_schedules() -> None:
                 trigger=CronTrigger(hour=h, minute=m, timezone=tz),
                 args=[user.tg_id],
                 id=job_id,
+                replace_existing=True,
+            )
+
+            scheduler.add_job(
+                send_context_reminder,
+                trigger=CronTrigger(day_of_week="mon", hour=h, minute=m, timezone=tz),
+                args=[user.tg_id, "week"],
+                id=f"context_week_{user.id}",
+                replace_existing=True,
+            )
+            scheduler.add_job(
+                send_context_reminder,
+                trigger=CronTrigger(day=1, hour=h, minute=m, timezone=tz),
+                args=[user.tg_id, "month"],
+                id=f"context_month_{user.id}",
                 replace_existing=True,
             )
 

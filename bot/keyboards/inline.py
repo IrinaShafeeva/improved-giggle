@@ -13,9 +13,8 @@ from aiogram.types import (
 def main_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🧠 Dump"), KeyboardButton(text="🎯 Фокус дня")],
-            [KeyboardButton(text="📅 Фокус недели"), KeyboardButton(text="🗓 Фокус месяца")],
-            [KeyboardButton(text="⚙️ Настройки")],
+            [KeyboardButton(text="🧠 Выгрузка"), KeyboardButton(text="📌 Контекст")],
+            [KeyboardButton(text="📋 Задачи"), KeyboardButton(text="⚙️ Настройки")],
         ],
         resize_keyboard=True,
     )
@@ -118,6 +117,7 @@ def weekly_focus_kb(options: list[tuple[int, str]]) -> InlineKeyboardMarkup:
 
 def tone_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Без терапии", callback_data="tone:no_therapy")],
         [
             InlineKeyboardButton(text="😐 Нейтральный", callback_data="tone:neutral"),
             InlineKeyboardButton(text="🤗 Мягкий", callback_data="tone:soft"),
@@ -215,12 +215,9 @@ def go_deeper_kb(session_id: int) -> InlineKeyboardMarkup:
 
 def settings_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🌍 Сферы и фокусы", callback_data="set:spheres")],
-        [InlineKeyboardButton(text="📅 Фокус недели", callback_data="set:weekly_focus")],
-        [InlineKeyboardButton(text="🗓 Фокус месяца", callback_data="set:monthly_focus")],
+        [InlineKeyboardButton(text="📌 Контекст недели/месяца", callback_data="set:context")],
         [InlineKeyboardButton(text="🎭 Тон бота", callback_data="set:tone")],
         [InlineKeyboardButton(text="🌅 Утренний пинг", callback_data="set:morning_time")],
-        [InlineKeyboardButton(text="🌙 Вечерний отчёт", callback_data="set:evening_time")],
     ])
 
 
@@ -245,13 +242,39 @@ def todo_input_kb() -> InlineKeyboardMarkup:
 def todo_list_kb(todos: list) -> InlineKeyboardMarkup:
     """Inline keyboard for a list of pending TodoItems."""
     buttons = []
+    session_id = todos[0].session_id if todos else None
     for todo in todos:
         label = todo.text[:28] + "…" if len(todo.text) > 28 else todo.text
         buttons.append([
             InlineKeyboardButton(text=f"✅ {label}", callback_data=f"todo:done:{todo.id}"),
             InlineKeyboardButton(text="➡️ Завтра", callback_data=f"todo:carry:{todo.id}"),
         ])
+    callback = f"todo:add:{session_id}" if session_id else "todo:add"
+    buttons.append([InlineKeyboardButton(text="➕ Добавить задачу", callback_data=callback)])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def context_period_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Контекст недели", callback_data="context:week")],
+        [InlineKeyboardButton(text="Контекст месяца", callback_data="context:month")],
+    ])
+
+
+def tasks_review_kb(session_id: int, has_tasks: bool = True) -> InlineKeyboardMarkup:
+    rows = []
+    if has_tasks:
+        rows.append([InlineKeyboardButton(text="✅ Добавить все", callback_data=f"tasks:add_all:{session_id}")])
+    rows.append([InlineKeyboardButton(text="➕ Добавить задачу", callback_data=f"tasks:add_one:{session_id}")])
+    rows.append([InlineKeyboardButton(text="Не добавлять", callback_data=f"tasks:skip:{session_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def add_task_kb(session_id: int | None = None) -> InlineKeyboardMarkup:
+    callback = f"tasks:cancel_add:{session_id}" if session_id else "tasks:cancel_add"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Отмена", callback_data=callback)],
+    ])
 
 
 # ── Voice transcription confirmation ──────────────────────────────────────────

@@ -14,7 +14,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import User, TodoItem
+from bot.db.models import User, TodoItem, DailySession
 from bot.keyboards.inline import todo_input_kb, todo_list_kb, main_menu_kb, voice_confirm_kb
 from bot.services.transcriber import transcriber
 from bot.states.fsm import FocusStates
@@ -58,7 +58,7 @@ def _parse_todo_lines(raw: str) -> list[str]:
 async def _save_todos(
     db: AsyncSession,
     user_db: User,
-    session_id: int,
+    session_id: int | None,
     texts: list[str],
     today: date,
     carried_from_ids: list[int] | None = None,
@@ -83,7 +83,7 @@ async def _save_todos(
 
 
 async def _get_pending_todos(
-    db: AsyncSession, user_id: int, session_id: int
+    db: AsyncSession, user_id: int, session_id: int | None
 ) -> list[TodoItem]:
     result = await db.execute(
         select(TodoItem).where(
@@ -95,11 +95,63 @@ async def _get_pending_todos(
     return list(result.scalars().all())
 
 
+async def _get_pending_todos_for_date(
+    db: AsyncSession, user_id: int, today: date
+) -> list[TodoItem]:
+    result = await db.execute(
+        select(TodoItem).where(
+            TodoItem.user_id == user_id,
+            TodoItem.date_local == today,
+            TodoItem.status == "pending",
+        )
+    )
+    return list(result.scalars().all())
+
+
 def _format_todos_message(todos: list[TodoItem]) -> str:
     lines = ["📋 *Дела на сегодня:*"]
     for t in todos:
         lines.append(f"• {t.text}")
     return "\n".join(lines)
+
+
+def _session_tasks(session: DailySession) -> list[str]:
+    if session.household_tasks and isinstance(session.household_tasks, dict):
+        tasks = session.household_tasks.get("tasks", [])
+        if isinstance(tasks, list):
+            return [str(t).strip() for t in tasks if str(t).strip()]
+    if session.llm_response_json and isinstance(session.llm_response_json, dict):
+        tasks = session.llm_response_json.get("tasks", [])
+        if isinstance(tasks, list):
+            return [str(t).strip() for t in tasks if str(t).strip()]
+    return []
+
+
+@router.message(F.text == "📋 Задачи")
+async def tasks_button(
+    message: Message,
+    state: FSMContext,
+    db: AsyncSession,
+    user_db: User,
+) -> None:
+    if not user_db.onboarding_complete:
+        await message.answer("Сначала пройди настройку: /start")
+        return
+    today = _user_today(user_db)
+    todos = await _get_pending_todos_for_date(db, user_db.id, today)
+    if todos:
+        await message.answer(
+            _format_todos_message(todos),
+            parse_mode="Markdown",
+            reply_markup=todo_list_kb(todos),
+        )
+    else:
+        await state.set_state(FocusStates.entering_todos)
+        await state.update_data(session_id=None)
+        await message.answer(
+            "На сегодня нет открытых задач. Напиши или наговори новую задачу.",
+            reply_markup=todo_input_kb(),
+        )
 
 
 # ── Todo input after focus confirmed ──────────────────────────────────────────
@@ -210,6 +262,77 @@ async def on_todo_skip(
     await callback.message.edit_text("Ок, без списка дел. Поехали! 🚀")
     await callback.message.answer("Главное меню:", reply_markup=main_menu_kb())
     await state.clear()
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tasks:add_all:"))
+async def on_tasks_add_all(
+    callback: CallbackQuery,
+    db: AsyncSession,
+    user_db: User,
+) -> None:
+    session_id = int(callback.data.split(":")[2])
+    result = await db.execute(
+        select(DailySession).where(
+            DailySession.id == session_id,
+            DailySession.user_id == user_db.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        await callback.answer("Сессия не найдена", show_alert=True)
+        return
+
+    tasks = _session_tasks(session)
+    if not tasks:
+        await callback.answer("Задачи не найдены", show_alert=True)
+        return
+
+    today = _user_today(user_db)
+    existing = await _get_pending_todos(db, user_db.id, session_id)
+    existing_texts = {t.text.strip().lower() for t in existing}
+    new_tasks = [t for t in tasks if t.strip().lower() not in existing_texts]
+    if new_tasks:
+        await _save_todos(db, user_db, session_id, new_tasks, today)
+
+    todos = await _get_pending_todos(db, user_db.id, session_id)
+    await callback.message.edit_text(
+        _format_todos_message(todos) if todos else "Задач нет.",
+        parse_mode="Markdown",
+        reply_markup=todo_list_kb(todos) if todos else None,
+    )
+    await callback.answer("Добавлено")
+
+
+@router.callback_query(F.data.startswith("tasks:add_one:"))
+async def on_tasks_add_one(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    session_id = int(callback.data.split(":")[2])
+    await state.set_state(FocusStates.entering_todos)
+    await state.update_data(session_id=session_id)
+    await callback.message.answer("Напиши или наговори задачу. Можно несколько через запятую или с новой строки.")
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("tasks:skip:"))
+async def on_tasks_skip(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("Ок, задачи не добавляю.")
+    await callback.message.answer("Главное меню:", reply_markup=main_menu_kb())
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("todo:add"))
+async def on_todo_add(
+    callback: CallbackQuery,
+    state: FSMContext,
+) -> None:
+    parts = callback.data.split(":")
+    session_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+    await state.set_state(FocusStates.entering_todos)
+    await state.update_data(session_id=session_id)
+    await callback.message.answer("Напиши или наговори новую задачу.")
     await callback.answer()
 
 

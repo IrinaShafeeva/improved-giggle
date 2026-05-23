@@ -9,18 +9,22 @@ from bot.handlers.evening import router as evening_router
 from bot.handlers.deeper import router as deeper_router
 from bot.handlers.settings import router as settings_router
 from bot.handlers.todos import router as todos_router
+from bot.handlers.context import router as context_router
+from bot.handlers.admin import router as admin_router
 
 
 def get_all_routers() -> list[Router]:
     """Order matters: specific handlers first, catch-all (dump) last."""
     return [
         start_router,
+        admin_router,
         onboarding_router,
         focus_router,
         todos_router,        # todo input state + item callbacks
         checkin_router,
         evening_router,
         deeper_router,
+        context_router,
         settings_router,    # must be before dump (has menu button handlers)
         dump_router,         # has catch-all voice/text handlers — keep last
     ]

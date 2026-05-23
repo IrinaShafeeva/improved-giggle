@@ -25,7 +25,11 @@ class FocusOption:
 class DumpAnalysis:
     emotion_mirror: str = ""  # A
     need_meaning: str = ""  # B
+    structure: list[str] = field(default_factory=list)
     tasks: list[str] = field(default_factory=list)  # C
+    blind_spots: list[str] = field(default_factory=list)
+    context_links: str = ""
+    day_summary: str = ""
     focus_mapping: str = ""  # D
     option_a: Optional[FocusOption] = None  # E+F
     option_b: Optional[FocusOption] = None  # E+F
@@ -44,12 +48,16 @@ class CoachEngine:
         monthly_focus: str,
         tone: str,
         spheres: str = "",
+        weekly_context: str = "",
+        monthly_context: str = "",
     ) -> DumpAnalysis:
         system_prompt = build_analyze_prompt(
             tone=tone,
             weekly_focus=weekly_focus,
             monthly_focus=monthly_focus,
             spheres=spheres,
+            weekly_context=weekly_context,
+            monthly_context=monthly_context,
         )
 
         data = await llm_client.chat_json(
@@ -88,9 +96,15 @@ class CoachEngine:
 
     @staticmethod
     def _parse_analysis(data: dict[str, Any]) -> DumpAnalysis:
+        def _as_list(value: Any) -> list[str]:
+            if isinstance(value, list):
+                return [str(item).strip() for item in value if str(item).strip()]
+            if isinstance(value, str):
+                return [t.strip("- •") for t in value.split("\n") if t.strip()]
+            return []
+
         tasks_raw = data.get("tasks", [])
-        if isinstance(tasks_raw, str):
-            tasks_raw = [t.strip("- ") for t in tasks_raw.split("\n") if t.strip()]
+        tasks_raw = _as_list(tasks_raw)
 
         opt_a_raw = data.get("option_a", {})
         opt_b_raw = data.get("option_b", {})
@@ -116,7 +130,11 @@ class CoachEngine:
         return DumpAnalysis(
             emotion_mirror=data.get("emotion_mirror", ""),
             need_meaning=data.get("need_meaning", ""),
-            tasks=tasks_raw[:7],
+            structure=_as_list(data.get("structure", []))[:6],
+            tasks=tasks_raw[:10],
+            blind_spots=_as_list(data.get("blind_spots", []))[:5],
+            context_links=data.get("context_links", ""),
+            day_summary=data.get("day_summary", ""),
             focus_mapping=data.get("focus_mapping", ""),
             option_a=option_a,
             option_b=option_b,
