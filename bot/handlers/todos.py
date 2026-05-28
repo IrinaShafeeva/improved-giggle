@@ -323,6 +323,43 @@ async def on_tasks_skip(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
+@router.callback_query(F.data.startswith("carried:add_all:"))
+async def on_carried_add_all(
+    callback: CallbackQuery,
+    db: AsyncSession,
+    user_db: User,
+) -> None:
+    session_id = int(callback.data.split(":")[2])
+    today = _user_today(user_db)
+    result = await db.execute(
+        select(TodoItem).where(
+            TodoItem.user_id == user_db.id,
+            TodoItem.date_local <= today,
+            TodoItem.status == "pending",
+            TodoItem.session_id.is_(None),
+        )
+    )
+    carried_items = list(result.scalars().all())
+    for item in carried_items:
+        item.session_id = session_id
+        item.date_local = today
+    await db.commit()
+
+    todos = await _get_pending_todos(db, user_db.id, session_id)
+    await callback.message.edit_text(
+        _format_todos_message(todos) if todos else "Хвостов не осталось.",
+        parse_mode="Markdown",
+        reply_markup=todo_list_kb(todos) if todos else None,
+    )
+    await callback.answer("Хвосты добавлены")
+
+
+@router.callback_query(F.data.startswith("carried:skip:"))
+async def on_carried_skip(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("Ок, хвосты пока не добавляю.")
+    await callback.answer()
+
+
 @router.callback_query(F.data.startswith("todo:add"))
 async def on_todo_add(
     callback: CallbackQuery,

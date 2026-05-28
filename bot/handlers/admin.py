@@ -103,3 +103,17 @@ async def broadcast_update(
         f"Рассылка завершена.\nОтправлено: {sent}\nОшибок: {failed}",
         parse_mode=None,
     )
+
+
+@router.message(Command("whoami"))
+async def whoami(message: Message) -> None:
+    """Show Telegram id and whether current env treats the user as admin."""
+    tg_id = message.from_user.id if message.from_user else None
+    admin_ids = _admin_ids()
+    await message.answer(
+        "Диагностика доступа:\n"
+        f"Твой Telegram ID: {tg_id}\n"
+        f"Админ: {'да' if tg_id in admin_ids else 'нет'}\n"
+        f"ADMIN_TG_IDS прочитано как: {sorted(admin_ids)}",
+        parse_mode=None,
+    )

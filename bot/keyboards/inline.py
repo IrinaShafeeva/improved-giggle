@@ -270,6 +270,13 @@ def tasks_review_kb(session_id: int, has_tasks: bool = True) -> InlineKeyboardMa
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def carried_tasks_kb(session_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Добавить хвосты", callback_data=f"carried:add_all:{session_id}")],
+        [InlineKeyboardButton(text="Пока не добавлять", callback_data=f"carried:skip:{session_id}")],
+    ])
+
+
 def add_task_kb(session_id: int | None = None) -> InlineKeyboardMarkup:
     callback = f"tasks:cancel_add:{session_id}" if session_id else "tasks:cancel_add"
     return InlineKeyboardMarkup(inline_keyboard=[

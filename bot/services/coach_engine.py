@@ -28,7 +28,10 @@ class DumpAnalysis:
     structure: list[str] = field(default_factory=list)
     tasks: list[str] = field(default_factory=list)  # C
     blind_spots: list[str] = field(default_factory=list)
+    main_tension: str = ""
+    day_risk: str = ""
     context_links: str = ""
+    sharp_question: str = ""
     day_summary: str = ""
     focus_mapping: str = ""  # D
     option_a: Optional[FocusOption] = None  # E+F
@@ -133,7 +136,10 @@ class CoachEngine:
             structure=_as_list(data.get("structure", []))[:6],
             tasks=tasks_raw[:10],
             blind_spots=_as_list(data.get("blind_spots", []))[:5],
+            main_tension=data.get("main_tension", ""),
+            day_risk=data.get("day_risk", ""),
             context_links=data.get("context_links", ""),
+            sharp_question=data.get("sharp_question", ""),
             day_summary=data.get("day_summary", ""),
             focus_mapping=data.get("focus_mapping", ""),
             option_a=option_a,

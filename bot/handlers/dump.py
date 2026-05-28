@@ -14,8 +14,9 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import User, Focus, DailySession, UserContext
+from bot.db.models import User, Focus, DailySession, UserContext, TodoItem
 from bot.keyboards.inline import (
+    carried_tasks_kb,
     main_menu_kb,
     tasks_review_kb,
     voice_confirm_kb,
@@ -65,8 +66,14 @@ def _format_analysis(a: DumpAnalysis) -> str:
     if a.blind_spots:
         blind_spots_text = "\n".join(f"  • {item}" for item in a.blind_spots)
         lines.append(f"🔎 *Мысли, которые могут влиять сильнее, чем кажется*\n{blind_spots_text}")
+    if a.main_tension:
+        lines.append(f"⚡ *Главное напряжение*\n{a.main_tension}")
+    if a.day_risk:
+        lines.append(f"🕳 *Что может съесть день*\n{a.day_risk}")
     if a.context_links:
         lines.append(f"📌 *Связь с контекстом*\n{a.context_links}")
+    if a.sharp_question:
+        lines.append(f"❓ *Один точный вопрос*\n{a.sharp_question}")
     if a.day_summary:
         lines.append(f"🎯 *Главное на сегодня*\n{a.day_summary}")
 
@@ -379,6 +386,24 @@ async def _process_dump(
 
     formatted = _format_analysis(analysis)
     await message.answer(formatted or "Я записала выгрузку.", parse_mode="Markdown")
+
+    carried_result = await db.execute(
+        select(TodoItem).where(
+            TodoItem.user_id == user_db.id,
+            TodoItem.date_local <= today,
+            TodoItem.status == "pending",
+            TodoItem.session_id.is_(None),
+        )
+    )
+    carried_items = list(carried_result.scalars().all())
+    if carried_items:
+        carried_text = "\n".join(f"  • {item.text}" for item in carried_items)
+        await message.answer(
+            "Ооо, со вчера хвосты остались:\n"
+            f"{carried_text}\n\n"
+            "Добавляем их в задачи на сегодня?",
+            reply_markup=carried_tasks_kb(session_obj.id),
+        )
 
     task_count = len(analysis.tasks)
     if task_count:
