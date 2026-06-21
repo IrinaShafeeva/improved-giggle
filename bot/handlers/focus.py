@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, DailySession
 from bot.keyboards.inline import energy_kb, go_deeper_kb, main_menu_kb, todo_input_kb
-from bot.services.scheduler_service import schedule_checkins, schedule_evening_reminders
+from bot.services.scheduler_service import (
+    schedule_checkins,
+    schedule_evening_reminders,
+    schedule_todo_reminders,
+)
 from bot.states.fsm import FocusStates
 from bot.utils.analytics import log_event
 
@@ -128,8 +132,8 @@ async def on_energy_confirmed(
     if go_deeper:
         await callback.message.edit_text(
             response_text + "\n\n"
-            "💭 Я заметил в твоём дампе сигналы тревоги или перегрузки. "
-            "Если хочешь — можем разобраться глубже.",
+            "💭 Тут есть место, где полезно разложить решение подробнее. "
+            "Если хочешь — можем пройтись по нему отдельно.",
             reply_markup=go_deeper_kb(session_id),
         )
     else:
@@ -166,6 +170,7 @@ async def _ask_for_todos(callback, state, db, user_db, session_id: int) -> None:
         item.date_local = today
     if carried_items:
         await db.commit()
+        schedule_todo_reminders(user_db, today)
 
     carried_text = ""
     if carried_items:

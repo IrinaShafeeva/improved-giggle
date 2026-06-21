@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, TodoItem, DailySession
 from bot.keyboards.inline import todo_input_kb, todo_list_kb, main_menu_kb, voice_confirm_kb
+from bot.services.scheduler_service import schedule_todo_reminders
 from bot.services.transcriber import transcriber
 from bot.states.fsm import FocusStates
 
@@ -79,31 +80,43 @@ async def _save_todos(
     await db.commit()
     for item in todos:
         await db.refresh(item)
+    if todos:
+        schedule_todo_reminders(user_db, today)
     return todos
 
 
 async def _get_pending_todos(
-    db: AsyncSession, user_id: int, session_id: int | None
+    db: AsyncSession,
+    user_id: int,
+    session_id: int | None,
+    target_date: date | None = None,
 ) -> list[TodoItem]:
+    conditions = [
+        TodoItem.user_id == user_id,
+        TodoItem.status == "pending",
+    ]
+    if session_id is None:
+        conditions.append(TodoItem.session_id.is_(None))
+        if target_date is not None:
+            conditions.append(TodoItem.date_local == target_date)
+    else:
+        conditions.append(TodoItem.session_id == session_id)
+
     result = await db.execute(
-        select(TodoItem).where(
-            TodoItem.user_id == user_id,
-            TodoItem.session_id == session_id,
-            TodoItem.status == "pending",
-        )
+        select(TodoItem).where(*conditions).order_by(TodoItem.created_at)
     )
     return list(result.scalars().all())
 
 
-async def _get_pending_todos_for_date(
+async def _get_open_todos_for_today(
     db: AsyncSession, user_id: int, today: date
 ) -> list[TodoItem]:
     result = await db.execute(
         select(TodoItem).where(
             TodoItem.user_id == user_id,
-            TodoItem.date_local == today,
+            TodoItem.date_local <= today,
             TodoItem.status == "pending",
-        )
+        ).order_by(TodoItem.date_local, TodoItem.created_at)
     )
     return list(result.scalars().all())
 
@@ -138,8 +151,16 @@ async def tasks_button(
         await message.answer("Сначала пройди настройку: /start")
         return
     today = _user_today(user_db)
-    todos = await _get_pending_todos_for_date(db, user_db.id, today)
+    todos = await _get_open_todos_for_today(db, user_db.id, today)
     if todos:
+        had_overdue = False
+        for todo in todos:
+            if todo.date_local < today:
+                todo.date_local = today
+                had_overdue = True
+        if had_overdue:
+            await db.commit()
+            schedule_todo_reminders(user_db, today)
         await message.answer(
             _format_todos_message(todos),
             parse_mode="Markdown",
@@ -168,7 +189,7 @@ async def _finish_todos(
     today = _user_today(user_db)
 
     # Show final todo list if any were saved
-    todos = await _get_pending_todos(db, user_db.id, session_id)
+    todos = await _get_pending_todos(db, user_db.id, session_id, today)
     if todos:
         await message.answer(
             _format_todos_message(todos) + "\n\nВсё записала! Буду напоминать.",
@@ -289,13 +310,13 @@ async def on_tasks_add_all(
         return
 
     today = _user_today(user_db)
-    existing = await _get_pending_todos(db, user_db.id, session_id)
+    existing = await _get_pending_todos(db, user_db.id, session_id, today)
     existing_texts = {t.text.strip().lower() for t in existing}
     new_tasks = [t for t in tasks if t.strip().lower() not in existing_texts]
     if new_tasks:
         await _save_todos(db, user_db, session_id, new_tasks, today)
 
-    todos = await _get_pending_todos(db, user_db.id, session_id)
+    todos = await _get_pending_todos(db, user_db.id, session_id, today)
     await callback.message.edit_text(
         _format_todos_message(todos) if todos else "Задач нет.",
         parse_mode="Markdown",
@@ -344,8 +365,10 @@ async def on_carried_add_all(
         item.session_id = session_id
         item.date_local = today
     await db.commit()
+    if carried_items:
+        schedule_todo_reminders(user_db, today)
 
-    todos = await _get_pending_todos(db, user_db.id, session_id)
+    todos = await _get_pending_todos(db, user_db.id, session_id, today)
     await callback.message.edit_text(
         _format_todos_message(todos) if todos else "Хвостов не осталось.",
         parse_mode="Markdown",
@@ -389,6 +412,9 @@ async def on_todo_done(
     if not todo:
         await callback.answer("Задача не найдена", show_alert=True)
         return
+    if todo.status != "pending":
+        await callback.answer("Эта задача уже обработана", show_alert=True)
+        return
 
     todo.status = "done"
     await db.commit()
@@ -396,7 +422,7 @@ async def on_todo_done(
 
     # Refresh remaining todos and update message
     session_id = todo.session_id
-    remaining = await _get_pending_todos(db, user_db.id, session_id)
+    remaining = await _get_pending_todos(db, user_db.id, session_id, todo.date_local)
     if remaining:
         await callback.message.edit_text(
             _format_todos_message(remaining),
@@ -421,6 +447,9 @@ async def on_todo_carry(
     if not todo:
         await callback.answer("Задача не найдена", show_alert=True)
         return
+    if todo.status != "pending":
+        await callback.answer("Эта задача уже обработана", show_alert=True)
+        return
 
     # Mark original as carried over
     todo.status = "carried_over"
@@ -439,11 +468,12 @@ async def on_todo_carry(
     )
     db.add(new_item)
     await db.commit()
+    schedule_todo_reminders(user_db, tomorrow)
     await callback.answer("➡️ Перенесено на завтра")
 
     # Refresh remaining todos
     session_id = todo.session_id
-    remaining = await _get_pending_todos(db, user_db.id, session_id)
+    remaining = await _get_pending_todos(db, user_db.id, session_id, todo.date_local)
     if remaining:
         await callback.message.edit_text(
             _format_todos_message(remaining),

@@ -56,7 +56,7 @@ async def _get_contexts(db: AsyncSession, user_id: int) -> tuple[str, str]:
 def _format_analysis(a: DumpAnalysis) -> str:
     lines = []
     if a.emotion_mirror:
-        lines.append(f"🪞 *Что я слышу*\n{a.emotion_mirror}")
+        lines.append(f"🪞 *Коротко*\n{a.emotion_mirror}")
     if a.structure:
         structure_text = "\n".join(f"  • {item}" for item in a.structure)
         lines.append(f"🧩 *Структура*\n{structure_text}")
@@ -65,17 +65,17 @@ def _format_analysis(a: DumpAnalysis) -> str:
         lines.append(f"📋 *Задачи*\n{tasks_text}")
     if a.blind_spots:
         blind_spots_text = "\n".join(f"  • {item}" for item in a.blind_spots)
-        lines.append(f"🔎 *Мысли, которые могут влиять сильнее, чем кажется*\n{blind_spots_text}")
+        lines.append(f"🔎 *Гипотезы по решениям*\n{blind_spots_text}")
     if a.main_tension:
-        lines.append(f"⚡ *Главное напряжение*\n{a.main_tension}")
+        lines.append(f"⚡ *Главная развилка*\n{a.main_tension}")
     if a.day_risk:
-        lines.append(f"🕳 *Что может съесть день*\n{a.day_risk}")
+        lines.append(f"📍 *Точка внимания*\n{a.day_risk}")
     if a.context_links:
         lines.append(f"📌 *Связь с контекстом*\n{a.context_links}")
     if a.sharp_question:
         lines.append(f"❓ *Один точный вопрос*\n{a.sharp_question}")
     if a.day_summary:
-        lines.append(f"🎯 *Главное на сегодня*\n{a.day_summary}")
+        lines.append(f"🎯 *Следующий ход*\n{a.day_summary}")
 
     return "\n\n".join(lines)
 
@@ -399,9 +399,9 @@ async def _process_dump(
     if carried_items:
         carried_text = "\n".join(f"  • {item.text}" for item in carried_items)
         await message.answer(
-            "Ооо, со вчера хвосты остались:\n"
+            "Есть открытые задачи с прошлых дней:\n"
             f"{carried_text}\n\n"
-            "Добавляем их в задачи на сегодня?",
+            "Добавить их в список на сегодня?",
             reply_markup=carried_tasks_kb(session_obj.id),
         )
 

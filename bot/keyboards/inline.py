@@ -218,6 +218,7 @@ def settings_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📌 Контекст недели/месяца", callback_data="set:context")],
         [InlineKeyboardButton(text="🎭 Тон бота", callback_data="set:tone")],
         [InlineKeyboardButton(text="🌅 Утренний пинг", callback_data="set:morning_time")],
+        [InlineKeyboardButton(text="🌙 Вечерний отчёт", callback_data="set:evening_time")],
     ])
 
 

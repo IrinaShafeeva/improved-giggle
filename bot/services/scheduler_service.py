@@ -11,7 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy import select
 
-from bot.db.models import User, DailySession
+from bot.db.models import User, DailySession, TodoItem
 from bot.db.session import async_session
 
 logger = logging.getLogger(__name__)
@@ -123,6 +123,49 @@ async def send_evening_reminder(user_tg_id: int, session_id: int, attempt: int =
         logger.error("Failed to send evening reminder to %s: %s", user_tg_id, e)
 
 
+# ── Todo reminders ────────────────────────────────────────────────────────────
+
+async def send_todo_reminder(user_tg_id: int, date_iso: str, attempt: int = 1) -> None:
+    """Send a calm reminder with today's open todo list."""
+    if _bot is None:
+        return
+
+    from bot.keyboards.inline import todo_list_kb
+
+    target_date = date_type.fromisoformat(date_iso)
+    async with async_session() as db:
+        user_result = await db.execute(select(User).where(User.tg_id == user_tg_id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            return
+
+        pending_result = await db.execute(
+            select(TodoItem).where(
+                TodoItem.user_id == user.id,
+                TodoItem.date_local == target_date,
+                TodoItem.status == "pending",
+            )
+        )
+        todos = list(pending_result.scalars().all())
+
+    if not todos:
+        return
+
+    label = "сегодня" if attempt == 1 else "перед закрытием дня"
+    lines = [f"📋 Короткий пинг по задачам на {label}:"]
+    lines.extend(f"• {todo.text}" for todo in todos)
+    lines.append("\nМожно отметить сделанное или перенести лишнее на завтра.")
+
+    try:
+        await _bot.send_message(
+            chat_id=user_tg_id,
+            text="\n".join(lines),
+            reply_markup=todo_list_kb(todos),
+        )
+    except Exception as e:
+        logger.error("Failed to send todo reminder to %s: %s", user_tg_id, e)
+
+
 # ── Schedule checkins for a specific session ───────────────────────────────────
 
 async def schedule_checkins(
@@ -207,6 +250,41 @@ def schedule_evening_reminders(
     logger.info("Scheduled evening reminders for session %s at %s", session.id, evening_dt)
 
 
+def schedule_todo_reminders(user: User, target_date: date_type) -> None:
+    """Schedule two lightweight reminders for open todo items on a date."""
+    tz = ZoneInfo(user.tz_personal or "Europe/Moscow")
+    now = datetime.now(tz)
+    if target_date < now.date():
+        return
+
+    if user.evening_report_time:
+        h, m = map(int, user.evening_report_time.split(":"))
+        evening_dt = datetime.combine(target_date, dt_time(h, m), tzinfo=tz)
+    else:
+        evening_dt = datetime.combine(target_date, dt_time(20, 0), tzinfo=tz)
+
+    first_dt = datetime.combine(target_date, dt_time(14, 0), tzinfo=tz)
+    if first_dt <= now:
+        first_dt = now + timedelta(hours=2)
+
+    second_dt = evening_dt - timedelta(minutes=45)
+    if second_dt <= first_dt:
+        second_dt = evening_dt
+
+    date_iso = target_date.isoformat()
+    for attempt, run_at in ((1, first_dt), (2, second_dt)):
+        if run_at <= now or run_at.date() != target_date:
+            continue
+        scheduler.add_job(
+            send_todo_reminder,
+            trigger=DateTrigger(run_date=run_at),
+            args=[user.tg_id, date_iso, attempt],
+            id=f"todo_{user.id}_{date_iso}_{attempt}",
+            replace_existing=True,
+        )
+    logger.info("Scheduled todo reminders for user %s on %s", user.id, date_iso)
+
+
 # ── Rebuild all scheduled jobs from DB on startup ──────────────────────────────
 
 async def rebuild_schedules() -> None:
@@ -224,6 +302,7 @@ async def rebuild_schedules() -> None:
         for user in users:
             h, m = map(int, (user.morning_ping_time or "09:00").split(":"))
             tz = ZoneInfo(user.tz_personal or "Europe/Moscow")
+            local_today = datetime.now(tz).date()
 
             job_id = f"morning_ping_{user.id}"
             scheduler.add_job(
@@ -249,15 +328,26 @@ async def rebuild_schedules() -> None:
                 replace_existing=True,
             )
 
+            todo_dates_result = await db.execute(
+                select(TodoItem.date_local).where(
+                    TodoItem.user_id == user.id,
+                    TodoItem.status == "pending",
+                    TodoItem.date_local >= local_today,
+                ).distinct()
+            )
+            for (todo_date,) in todo_dates_result.all():
+                schedule_todo_reminders(user, todo_date)
+
         logger.info("Rebuilt morning pings for %d users", len(users))
 
-        # Rebuild checkins and evening reminders for TODAY's active sessions only
+        # Rebuild checkins and evening reminders for active sessions around today.
         from datetime import timezone
         today_utc = datetime.now(timezone.utc).date()
         today_sessions = await db.execute(
             select(DailySession).where(
                 DailySession.accepted_at.isnot(None),
-                DailySession.date_local == today_utc,
+                DailySession.date_local >= today_utc - timedelta(days=1),
+                DailySession.date_local <= today_utc + timedelta(days=1),
             )
         )
         for session in today_sessions.scalars().all():
@@ -270,6 +360,8 @@ async def rebuild_schedules() -> None:
 
             tz = ZoneInfo(user.tz_personal or "Europe/Moscow")
             now = datetime.now(tz)
+            if session.date_local != now.date():
+                continue
 
             if session.accepted_at:
                 # Only schedule future checkins
@@ -295,5 +387,8 @@ async def rebuild_schedules() -> None:
 
             # Evening reminders
             schedule_evening_reminders(user, session)
+
+            # Todo reminders
+            schedule_todo_reminders(user, session.date_local)
 
         logger.info("Rebuilt session schedules")
