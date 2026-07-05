@@ -22,6 +22,8 @@ from bot.keyboards.inline import (
     voice_confirm_kb,
 )
 from bot.services.coach_engine import coach, DumpAnalysis
+from bot.services.profile_engine import PROFILE_PERIOD, format_profile_context, parse_profile
+from bot.services.scheduler_service import schedule_checkins, schedule_evening_reminders
 from bot.services.transcriber import transcriber
 from bot.states.fsm import DumpStates
 from bot.utils.analytics import log_event
@@ -53,29 +55,33 @@ async def _get_contexts(db: AsyncSession, user_id: int) -> tuple[str, str]:
     return weekly, monthly
 
 
+async def _get_profile_context(db: AsyncSession, user_id: int) -> str:
+    result = await db.execute(
+        select(UserContext).where(
+            UserContext.user_id == user_id,
+            UserContext.period == PROFILE_PERIOD,
+        )
+    )
+    context = result.scalar_one_or_none()
+    return format_profile_context(parse_profile(context.text if context else None))
+
+
 def _format_analysis(a: DumpAnalysis) -> str:
     lines = []
     if a.emotion_mirror:
         lines.append(f"🪞 *Коротко*\n{a.emotion_mirror}")
     if a.structure:
-        structure_text = "\n".join(f"  • {item}" for item in a.structure)
+        structure_text = "\n".join(f"  • {item}" for item in a.structure[:4])
         lines.append(f"🧩 *Структура*\n{structure_text}")
-    if a.tasks:
-        tasks_text = "\n".join(f"  • {t}" for t in a.tasks)
-        lines.append(f"📋 *Задачи*\n{tasks_text}")
     if a.blind_spots:
-        blind_spots_text = "\n".join(f"  • {item}" for item in a.blind_spots)
-        lines.append(f"🔎 *Гипотезы по решениям*\n{blind_spots_text}")
+        blind_spots_text = "\n".join(f"  • {item}" for item in a.blind_spots[:2])
+        lines.append(f"🔎 *Что уточнить*\n{blind_spots_text}")
     if a.main_tension:
-        lines.append(f"⚡ *Главная развилка*\n{a.main_tension}")
-    if a.day_risk:
-        lines.append(f"📍 *Точка внимания*\n{a.day_risk}")
-    if a.context_links:
-        lines.append(f"📌 *Связь с контекстом*\n{a.context_links}")
-    if a.sharp_question:
-        lines.append(f"❓ *Один точный вопрос*\n{a.sharp_question}")
+        lines.append(f"⚡ *Развилка*\n{a.main_tension}")
     if a.day_summary:
         lines.append(f"🎯 *Следующий ход*\n{a.day_summary}")
+    if a.tasks:
+        lines.append(f"📋 *Задачи*\nНашла {len(a.tasks)}. Ниже можно добавить их в список.")
 
     return "\n\n".join(lines)
 
@@ -276,7 +282,7 @@ async def on_text_direct(
 ) -> None:
     # Skip menu button texts
     menu_texts = {
-        "🧠 Выгрузка", "📌 Контекст", "📋 Задачи", "⚙️ Настройки",
+        "🧠 Выгрузка", "📌 Контекст", "📋 Задачи", "👤 Профиль", "⚙️ Настройки",
         "🧠 Dump", "🎯 Фокус дня", "📅 Фокус недели", "🗓 Фокус месяца",
     }
     if message.text.strip() in menu_texts:
@@ -337,6 +343,7 @@ async def _process_dump(
 
     weekly_focus, monthly_focus = await _get_focuses(db, user_db.id)
     weekly_context, monthly_context = await _get_contexts(db, user_db.id)
+    profile_context = await _get_profile_context(db, user_db.id)
 
     analysis = await coach.analyze_mind_dump(
         text=text,
@@ -346,6 +353,7 @@ async def _process_dump(
         spheres=", ".join(s.name for s in user_db.spheres) if user_db.spheres else "",
         weekly_context=weekly_context,
         monthly_context=monthly_context,
+        profile_context=profile_context,
     )
 
     # Reuse незавершённую сессию за сегодня (если была — пользователь начал dump и вышел)
@@ -383,6 +391,17 @@ async def _process_dump(
     await log_event(db, "dump_created", user_id=user_db.id, metadata={
         "is_voice": is_voice, "session_id": session_obj.id
     })
+
+    if session_obj.accepted_at:
+        try:
+            await schedule_checkins(user_db, session_obj, session_obj.accepted_at)
+        except Exception as e:
+            logger.error("Failed to schedule checkins for user %s: %s", user_db.id, e)
+
+    try:
+        schedule_evening_reminders(user_db, session_obj)
+    except Exception as e:
+        logger.error("Failed to schedule evening reminders for user %s: %s", user_db.id, e)
 
     formatted = _format_analysis(analysis)
     await message.answer(formatted or "Я записала выгрузку.", parse_mode="Markdown")

@@ -11,8 +11,9 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy import select
 
-from bot.db.models import User, DailySession, TodoItem
+from bot.db.models import User, UserContext, DailySession, EveningReport, TodoItem
 from bot.db.session import async_session
+from bot.services.profile_engine import PROFILE_PERIOD, build_morning_text, parse_profile
 
 logger = logging.getLogger(__name__)
 
@@ -37,11 +38,38 @@ async def send_morning_ping(user_tg_id: int) -> None:
 
     from bot.keyboards.inline import morning_ping_kb
 
+    text = (
+        "☀️ Доброе утро!\n\nСделаем «Мой день»? "
+        "Отправь голосовое или текст — выгрузи всё, что в голове."
+    )
+    async with async_session() as db:
+        user_result = await db.execute(select(User).where(User.tg_id == user_tg_id))
+        user = user_result.scalar_one_or_none()
+        if user:
+            profile_result = await db.execute(
+                select(UserContext).where(
+                    UserContext.user_id == user.id,
+                    UserContext.period == PROFILE_PERIOD,
+                )
+            )
+            profile_context = profile_result.scalar_one_or_none()
+            profile = parse_profile(profile_context.text if profile_context else None)
+            tz = ZoneInfo(user.tz_personal or "Europe/Moscow")
+            today = datetime.now(tz).date()
+            todos_result = await db.execute(
+                select(TodoItem).where(
+                    TodoItem.user_id == user.id,
+                    TodoItem.date_local <= today,
+                    TodoItem.status == "pending",
+                ).order_by(TodoItem.date_local, TodoItem.created_at)
+            )
+            open_todos = [todo.text for todo in todos_result.scalars().all()]
+            text = build_morning_text(profile, open_todos)
+
     try:
         await _bot.send_message(
             chat_id=user_tg_id,
-            text="☀️ Доброе утро!\n\nСделаем «Мой день»? "
-                 "Отправь голосовое или текст — выгрузи всё, что в голове.",
+            text=text,
             reply_markup=morning_ping_kb(),
         )
     except Exception as e:
@@ -102,6 +130,13 @@ async def send_evening_reminder(user_tg_id: int, session_id: int, attempt: int =
         return
 
     from bot.keyboards.inline import evening_status_kb
+
+    async with async_session() as db:
+        report_result = await db.execute(
+            select(EveningReport).where(EveningReport.daily_session_id == session_id)
+        )
+        if report_result.scalar_one_or_none():
+            return
 
     if attempt == 1:
         text = (
@@ -217,12 +252,13 @@ def schedule_evening_reminders(
 
     tz = ZoneInfo(user.tz_personal or "Europe/Moscow")
     h, m = map(int, user.evening_report_time.split(":"))
-    today = datetime.now(tz).date()
-    evening_dt = datetime.combine(today, dt_time(h, m), tzinfo=tz)
+    now = datetime.now(tz)
+    evening_dt = datetime.combine(session.date_local, dt_time(h, m), tzinfo=tz)
 
-    # If already past, skip
-    if evening_dt < datetime.now(tz):
+    if session.date_local < now.date():
         return
+    if evening_dt < now:
+        evening_dt = now + timedelta(minutes=1)
 
     base_id = f"evening_{session.id}"
 
@@ -248,6 +284,46 @@ def schedule_evening_reminders(
         replace_existing=True,
     )
     logger.info("Scheduled evening reminders for session %s at %s", session.id, evening_dt)
+
+
+def cancel_evening_reminders(session_id: int) -> None:
+    """Cancel pending evening report reminders once the day is closed."""
+    for attempt in (1, 2, 3):
+        job = scheduler.get_job(f"evening_{session_id}_{attempt}")
+        if job:
+            job.remove()
+
+
+def schedule_morning_reminders(user: User) -> None:
+    """Schedule daily personalized morning ping and context refresh reminders."""
+    if not user.morning_ping_time:
+        return
+
+    h, m = map(int, user.morning_ping_time.split(":"))
+    tz = ZoneInfo(user.tz_personal or "Europe/Moscow")
+
+    scheduler.add_job(
+        send_morning_ping,
+        trigger=CronTrigger(hour=h, minute=m, timezone=tz),
+        args=[user.tg_id],
+        id=f"morning_ping_{user.id}",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_context_reminder,
+        trigger=CronTrigger(day_of_week="mon", hour=h, minute=m, timezone=tz),
+        args=[user.tg_id, "week"],
+        id=f"context_week_{user.id}",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        send_context_reminder,
+        trigger=CronTrigger(day=1, hour=h, minute=m, timezone=tz),
+        args=[user.tg_id, "month"],
+        id=f"context_month_{user.id}",
+        replace_existing=True,
+    )
+    logger.info("Scheduled morning reminders for user %s at %s", user.id, user.morning_ping_time)
 
 
 def schedule_todo_reminders(user: User, target_date: date_type) -> None:
@@ -300,33 +376,10 @@ async def rebuild_schedules() -> None:
         users = result.scalars().all()
 
         for user in users:
-            h, m = map(int, (user.morning_ping_time or "09:00").split(":"))
             tz = ZoneInfo(user.tz_personal or "Europe/Moscow")
             local_today = datetime.now(tz).date()
 
-            job_id = f"morning_ping_{user.id}"
-            scheduler.add_job(
-                send_morning_ping,
-                trigger=CronTrigger(hour=h, minute=m, timezone=tz),
-                args=[user.tg_id],
-                id=job_id,
-                replace_existing=True,
-            )
-
-            scheduler.add_job(
-                send_context_reminder,
-                trigger=CronTrigger(day_of_week="mon", hour=h, minute=m, timezone=tz),
-                args=[user.tg_id, "week"],
-                id=f"context_week_{user.id}",
-                replace_existing=True,
-            )
-            scheduler.add_job(
-                send_context_reminder,
-                trigger=CronTrigger(day=1, hour=h, minute=m, timezone=tz),
-                args=[user.tg_id, "month"],
-                id=f"context_month_{user.id}",
-                replace_existing=True,
-            )
+            schedule_morning_reminders(user)
 
             todo_dates_result = await db.execute(
                 select(TodoItem.date_local).where(

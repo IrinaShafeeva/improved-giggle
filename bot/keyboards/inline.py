@@ -14,7 +14,8 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🧠 Выгрузка"), KeyboardButton(text="📌 Контекст")],
-            [KeyboardButton(text="📋 Задачи"), KeyboardButton(text="⚙️ Настройки")],
+            [KeyboardButton(text="📋 Задачи"), KeyboardButton(text="👤 Профиль")],
+            [KeyboardButton(text="⚙️ Настройки")],
         ],
         resize_keyboard=True,
     )
@@ -215,6 +216,7 @@ def go_deeper_kb(session_id: int) -> InlineKeyboardMarkup:
 
 def settings_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Мой профиль", callback_data="set:profile")],
         [InlineKeyboardButton(text="📌 Контекст недели/месяца", callback_data="set:context")],
         [InlineKeyboardButton(text="🎭 Тон бота", callback_data="set:tone")],
         [InlineKeyboardButton(text="🌅 Утренний пинг", callback_data="set:morning_time")],
@@ -259,6 +261,19 @@ def context_period_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Контекст недели", callback_data="context:week")],
         [InlineKeyboardButton(text="Контекст месяца", callback_data="context:month")],
+    ])
+
+
+def profile_confirm_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Да, сохранить", callback_data="profile:save")],
+        [InlineKeyboardButton(text="✏️ Поправить голосом/текстом", callback_data="profile:edit")],
+    ])
+
+
+def profile_view_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎙 Обновить голосом/текстом", callback_data="profile:update")],
     ])
 
 

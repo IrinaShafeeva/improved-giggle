@@ -26,6 +26,7 @@ from bot.keyboards.inline import (
     voice_confirm_kb,
 )
 from bot.services.llm_client import llm_client
+from bot.services.scheduler_service import schedule_morning_reminders
 from bot.services.transcriber import transcriber
 from bot.prompts.validate_goal import build_validate_goal_prompt, build_validate_goal_user_message
 from bot.prompts.decompose import build_decompose_prompt, build_decompose_user_message
@@ -37,7 +38,7 @@ router = Router()
 
 # Menu button texts that must NOT be treated as onboarding input
 _MENU_TEXTS = frozenset({
-    "🧠 Выгрузка", "📌 Контекст", "📋 Задачи", "⚙️ Настройки",
+    "🧠 Выгрузка", "📌 Контекст", "📋 Задачи", "👤 Профиль", "⚙️ Настройки",
     "🧠 Dump", "🎯 Фокус дня", "📅 Фокус недели", "🗓 Фокус месяца",
 })
 
@@ -800,6 +801,7 @@ async def on_evening_time(
     user_db.evening_report_time = time_str
     user_db.onboarding_complete = True
     await db.commit()
+    schedule_morning_reminders(user_db)
 
     await log_event(db, "onboarding_complete", user_id=user_db.id)
 

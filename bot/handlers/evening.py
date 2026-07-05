@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, DailySession, EveningReport
 from bot.keyboards.inline import main_menu_kb, voice_confirm_kb
+from bot.services.scheduler_service import cancel_evening_reminders
 from bot.states.fsm import EveningStates
 from bot.utils.analytics import log_event
 
@@ -47,6 +48,14 @@ async def on_evening_status(
     session_obj = result.scalar_one_or_none()
     if not session_obj:
         await callback.answer("Сессия не найдена", show_alert=True)
+        return
+
+    existing_report = await db.execute(
+        select(EveningReport).where(EveningReport.daily_session_id == session_id)
+    )
+    if existing_report.scalar_one_or_none():
+        await callback.message.edit_text("📝 День уже закрыт.")
+        await callback.answer("Уже закрыто")
         return
 
     status_emoji = {"done": "✅", "partial": "🟡", "fail": "❌"}.get(status, "")
@@ -97,6 +106,7 @@ async def on_evening_text(
         )
         db.add(report)
     await db.commit()
+    cancel_evening_reminders(session_id)
 
     await log_event(db, "evening_report_done", user_id=user_db.id, metadata={
         "session_id": session_id, "status": status,

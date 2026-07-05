@@ -33,6 +33,13 @@ class OnboardingStates(StatesGroup):
     choosing_evening_time = State()
 
 
+# ── Living profile ───────────────────────────────────────────────────────────
+
+class ProfileStates(StatesGroup):
+    collecting = State()       # free text/voice -> profile draft
+    confirming = State()       # user confirms or corrects extracted profile
+
+
 # ── Dump ──────────────────────────────────────────────────────────────────────
 
 class DumpStates(StatesGroup):

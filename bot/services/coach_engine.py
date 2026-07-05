@@ -53,6 +53,7 @@ class CoachEngine:
         spheres: str = "",
         weekly_context: str = "",
         monthly_context: str = "",
+        profile_context: str = "",
     ) -> DumpAnalysis:
         system_prompt = build_analyze_prompt(
             tone=tone,
@@ -61,6 +62,7 @@ class CoachEngine:
             spheres=spheres,
             weekly_context=weekly_context,
             monthly_context=monthly_context,
+            profile_context=profile_context,
         )
 
         data = await llm_client.chat_json(
@@ -133,9 +135,9 @@ class CoachEngine:
         return DumpAnalysis(
             emotion_mirror=data.get("emotion_mirror", ""),
             need_meaning=data.get("need_meaning", ""),
-            structure=_as_list(data.get("structure", []))[:6],
-            tasks=tasks_raw[:10],
-            blind_spots=_as_list(data.get("blind_spots", []))[:5],
+            structure=_as_list(data.get("structure", []))[:4],
+            tasks=tasks_raw[:6],
+            blind_spots=_as_list(data.get("blind_spots", []))[:2],
             main_tension=data.get("main_tension", ""),
             day_risk=data.get("day_risk", ""),
             context_links=data.get("context_links", ""),

@@ -9,6 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
@@ -126,6 +127,30 @@ def _format_todos_message(todos: list[TodoItem]) -> str:
     for t in todos:
         lines.append(f"• {t.text}")
     return "\n".join(lines)
+
+
+async def _refresh_todo_message(
+    callback: CallbackQuery,
+    db: AsyncSession,
+    user_db: User,
+    empty_text: str = "✅ Открытых дел на сегодня нет.",
+) -> list[TodoItem]:
+    """Edit the clicked todo message to the current canonical list."""
+    today = _user_today(user_db)
+    todos = await _get_open_todos_for_today(db, user_db.id, today)
+    try:
+        if todos:
+            await callback.message.edit_text(
+                _format_todos_message(todos),
+                parse_mode="Markdown",
+                reply_markup=todo_list_kb(todos),
+            )
+        else:
+            await callback.message.edit_text(empty_text)
+    except TelegramBadRequest as e:
+        if "message is not modified" not in str(e).lower():
+            logger.warning("Could not refresh todo message: %s", e)
+    return todos
 
 
 def _session_tasks(session: DailySession) -> list[str]:
@@ -310,19 +335,14 @@ async def on_tasks_add_all(
         return
 
     today = _user_today(user_db)
-    existing = await _get_pending_todos(db, user_db.id, session_id, today)
+    existing = await _get_open_todos_for_today(db, user_db.id, today)
     existing_texts = {t.text.strip().lower() for t in existing}
     new_tasks = [t for t in tasks if t.strip().lower() not in existing_texts]
     if new_tasks:
         await _save_todos(db, user_db, session_id, new_tasks, today)
 
-    todos = await _get_pending_todos(db, user_db.id, session_id, today)
-    await callback.message.edit_text(
-        _format_todos_message(todos) if todos else "Задач нет.",
-        parse_mode="Markdown",
-        reply_markup=todo_list_kb(todos) if todos else None,
-    )
-    await callback.answer("Добавлено")
+    await _refresh_todo_message(callback, db, user_db, "Задач нет.")
+    await callback.answer("Добавлено" if new_tasks else "Уже есть в списке")
 
 
 @router.callback_query(F.data.startswith("tasks:add_one:"))
@@ -368,12 +388,7 @@ async def on_carried_add_all(
     if carried_items:
         schedule_todo_reminders(user_db, today)
 
-    todos = await _get_pending_todos(db, user_db.id, session_id, today)
-    await callback.message.edit_text(
-        _format_todos_message(todos) if todos else "Хвостов не осталось.",
-        parse_mode="Markdown",
-        reply_markup=todo_list_kb(todos) if todos else None,
-    )
+    await _refresh_todo_message(callback, db, user_db, "Хвостов не осталось.")
     await callback.answer("Хвосты добавлены")
 
 
@@ -413,24 +428,15 @@ async def on_todo_done(
         await callback.answer("Задача не найдена", show_alert=True)
         return
     if todo.status != "pending":
-        await callback.answer("Эта задача уже обработана", show_alert=True)
+        await _refresh_todo_message(callback, db, user_db)
+        await callback.answer("Уже обработано, список обновлён")
         return
 
     todo.status = "done"
     await db.commit()
     await callback.answer("✅ Отмечено!")
 
-    # Refresh remaining todos and update message
-    session_id = todo.session_id
-    remaining = await _get_pending_todos(db, user_db.id, session_id, todo.date_local)
-    if remaining:
-        await callback.message.edit_text(
-            _format_todos_message(remaining),
-            parse_mode="Markdown",
-            reply_markup=todo_list_kb(remaining),
-        )
-    else:
-        await callback.message.edit_text("✅ Все дела на сегодня сделаны!")
+    await _refresh_todo_message(callback, db, user_db, "✅ Все дела на сегодня сделаны!")
 
 
 @router.callback_query(F.data.startswith("todo:carry:"))
@@ -448,7 +454,8 @@ async def on_todo_carry(
         await callback.answer("Задача не найдена", show_alert=True)
         return
     if todo.status != "pending":
-        await callback.answer("Эта задача уже обработана", show_alert=True)
+        await _refresh_todo_message(callback, db, user_db)
+        await callback.answer("Уже обработано, список обновлён")
         return
 
     # Mark original as carried over
@@ -471,14 +478,4 @@ async def on_todo_carry(
     schedule_todo_reminders(user_db, tomorrow)
     await callback.answer("➡️ Перенесено на завтра")
 
-    # Refresh remaining todos
-    session_id = todo.session_id
-    remaining = await _get_pending_todos(db, user_db.id, session_id, todo.date_local)
-    if remaining:
-        await callback.message.edit_text(
-            _format_todos_message(remaining),
-            parse_mode="Markdown",
-            reply_markup=todo_list_kb(remaining),
-        )
-    else:
-        await callback.message.edit_text("📋 Все дела перенесены или закрыты.")
+    await _refresh_todo_message(callback, db, user_db, "📋 Все дела перенесены или закрыты.")

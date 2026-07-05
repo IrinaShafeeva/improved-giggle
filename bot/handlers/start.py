@@ -7,8 +7,8 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User
-from bot.keyboards.inline import main_menu_kb, spheres_kb
-from bot.states.fsm import OnboardingStates
+from bot.handlers.profile import ask_profile_onboarding
+from bot.keyboards.inline import main_menu_kb
 from bot.utils.analytics import log_event
 
 router = Router()
@@ -34,14 +34,8 @@ async def cmd_start(
 
     await message.answer(
         "Привет! 👋\n\n"
-        "Я помогу тебе каждый день выгружать мысли, видеть чувства, контекст и задачи без терапевтической воды.\n\n"
-        "💡 На большинство вопросов можно отвечать голосом — просто отправь голосовое.\n\n"
-        "Начнём с карты твоей реальности.\n"
-        "Выбери 3–6 сфер жизни, которые для тебя важны сейчас.\n"
-        "Можешь добавить свою через «➕ Своя сфера».\n\n"
-        "Нажми на сферы и потом «Готово»:",
-        parse_mode="Markdown",
-        reply_markup=spheres_kb(),
+        "Я помогу каждый день выгружать мысли, отделять фон от реальных дел "
+        "и выбирать один посильный следующий шаг.\n\n"
+        "Начнём с живого профиля — без анкеты.",
     )
-    await state.set_state(OnboardingStates.choosing_spheres)
-    await state.update_data(selected_spheres=[])
+    await ask_profile_onboarding(message, state)

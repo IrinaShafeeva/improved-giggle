@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import User, Focus
 from bot.keyboards.inline import settings_kb, tone_kb, time_picker_kb, main_menu_kb, focus_view_kb, voice_confirm_kb
+from bot.services.scheduler_service import schedule_morning_reminders
 from bot.states.fsm import SettingsStates
 
 logger = logging.getLogger(__name__)
@@ -121,6 +122,7 @@ async def on_morning_edit(
     time_str = callback.data.split(":", 1)[1]
     user_db.morning_ping_time = time_str
     await db.commit()
+    schedule_morning_reminders(user_db)
     await callback.message.edit_text(f"✅ Утренний пинг: {time_str}")
     await state.clear()
     await callback.answer()

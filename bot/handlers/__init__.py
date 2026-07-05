@@ -1,6 +1,7 @@
 from aiogram import Router
 
 from bot.handlers.start import router as start_router
+from bot.handlers.profile import router as profile_router
 from bot.handlers.onboarding import router as onboarding_router
 from bot.handlers.dump import router as dump_router
 from bot.handlers.focus import router as focus_router
@@ -18,6 +19,7 @@ def get_all_routers() -> list[Router]:
     return [
         start_router,
         admin_router,
+        profile_router,
         onboarding_router,
         focus_router,
         todos_router,        # todo input state + item callbacks
